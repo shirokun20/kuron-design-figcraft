@@ -212,6 +212,8 @@
       "import_file": "Import file",
       "save_changes": "Save changes",
       "cancel": "Cancel",
+      "status_ready": "Ready",
+      "status_error": "Error",
       "search": "Search",
       "empty_title": "Nothing here yet",
       "empty_desc": "Import a file to get started.",

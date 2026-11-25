@@ -277,6 +277,8 @@ Guardrails:
 - `exec` rejects invalid JSON with a friendly message.
 - Run `frames` before `export`/`exec`; repeat after `reload`.
 - `reload --soft` is the default; `--hard` only when the structure is stale.
+  With no path it uses the file made active by `start`/`open`; a failed reload
+  exits non-zero and `watch` never exports a stale document.
 - `watch` is always bounded by `--max-events` / `--max-seconds` (cut-loop guard).
 - Never run two writers on one file; `watch` is read-only.
 - Never make claims from JSON metadata — evidence = PNG.
@@ -409,7 +411,7 @@ cut-loop guard, so an agent can never hang.
 semantic roles (`action-primary`, `data-technical`, …); legacy `TOKENS["colors"]`
 aliases remain as compatibility keys but carry manifest-resolved values.
 
-### 12.1 Real joint trial (mandatory, Stage 2)
+### 12.1 Real joint trial (mandatory, Stage 3)
 
 After `Kuron Developer` finished refactoring `scripts/`, `Kuron Designer` **must**
 run a real trial, not only unit tests:

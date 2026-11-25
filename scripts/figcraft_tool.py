@@ -269,6 +269,25 @@ class FigcraftDocument:
 
         return nid
 
+    @staticmethod
+    def _sanitize_node(value: Any, depth: int = 0) -> Any:
+        """Drop any literal ``overrides`` key from a node payload.
+
+        ``overrides`` is a builder-input concept, never a node property. A
+        bounded recursive strip also removes residual keys left by older files
+        so a duplicated subtree can never reintroduce one into document.json.
+        """
+        if depth > 32:  # cut-loop guard for malformed/cyclic payloads
+            return value
+        if isinstance(value, dict):
+            return {
+                key: FigcraftDocument._sanitize_node(item, depth + 1)
+                for key, item in value.items() if key != "overrides"
+            }
+        if isinstance(value, list):
+            return [FigcraftDocument._sanitize_node(item, depth + 1) for item in value]
+        return value
+
     def duplicate_node(
         self,
         node_id: int,
@@ -282,6 +301,9 @@ class FigcraftDocument:
 
         Every descendant gets a fresh id, its ``parent`` link is remapped, and
         fills, strokes, radius, padding, and layout are preserved verbatim.
+        ``overrides`` are applied directly onto the duplicated node's real
+        properties (deep-copied so the source template is never mutated); the
+        builder-only ``overrides`` key is never written into node JSON.
         A visited set and a hard ceiling keep the traversal bounded even if a
         malformed document contains a parent cycle.
         """
@@ -289,6 +311,9 @@ class FigcraftDocument:
         if not isinstance(root, dict):
             return None
         target_parent = parent_id if parent_id is not None else root.get("parent", 1)
+        clean_overrides = self._sanitize_node(overrides or {})
+        if not isinstance(clean_overrides, dict):
+            clean_overrides = {}
         id_map: Dict[int, int] = {}
         todo = [node_id]
         visited: set = set()
@@ -309,7 +334,7 @@ class FigcraftDocument:
             source = self.doc["nodes"][old_id]
             new_id = self.alloc_id()
             id_map[int(old_id)] = new_id
-            clone = copy.deepcopy(source)
+            clone = self._sanitize_node(copy.deepcopy(source))
             clone["id"] = new_id
             if old_id == str(node_id):
                 if parent_id is not None:
@@ -323,8 +348,9 @@ class FigcraftDocument:
                     if y is not None:
                         transform[5] = float(y)
                     clone["transform"] = transform
-                if overrides:
-                    clone.update(copy.deepcopy(overrides))
+                if clean_overrides:
+                    clone.update(copy.deepcopy(clean_overrides))
+                clone.pop("overrides", None)  # belt-and-braces: never a node key
             self.doc["nodes"][str(new_id)] = clone
 
         # Remap links only after every id is allocated, so a child processed
@@ -348,9 +374,22 @@ class FigcraftDocument:
 
     def component_first(self, component_id: int, parent_id: int,
                         **overrides: Any) -> Optional[int]:
-        """Duplicate an existing component (the component-first workflow)."""
+        """Duplicate an existing component (the component-first workflow).
+
+        Accepts real node properties as keyword arguments and also flattens an
+        explicit ``overrides={...}`` mapping, so callers can express either
+        ``name=..., overrides={"fills": ...}`` or direct ``fills=...``. The
+        builder-only ``overrides`` key is never forwarded as a node property.
+        """
+        clean: Dict[str, Any] = {}
+        for key, value in overrides.items():
+            if key == "overrides" and isinstance(value, dict):
+                clean.update(value)
+            else:
+                clean[key] = value
+        clean.pop("overrides", None)
         return self.duplicate_node(component_id, parent_id=parent_id,
-                                   overrides=overrides or None)
+                                   overrides=clean or None)
 
     def prevent_clipping(self, node_id: int) -> bool:
         """Enable clipping on a screen-level frame to contain child content."""
@@ -621,12 +660,12 @@ class FigcraftDocument:
                         cx, cy = vals[4], vals[5]
                         i += 6
                     else:
-                        raise ValueError(f"create_vector: perintah path '{cmd}' tak didukung")
+                        raise ValueError(f"create_vector: unsupported path command '{cmd}'")
                     cur.append((cx, cy))
             if cur:
                 subs.append(cur)
             if not subs:
-                raise ValueError("create_vector: path kosong, tak ada titik")
+                raise ValueError("create_vector: empty path, no points")
             return subs
 
         subs = _subpaths()
@@ -689,14 +728,14 @@ class FigcraftDocument:
         from_id: int,
         to_id: int,
         parent_id: int,
-        from_side: str = "right",  # "right"|"left"|"top"|"bottom" (tengah sisi)
+        from_side: str = "right",  # "right"|"left"|"top"|"bottom" (side midpoint)
         to_side: str = "left",      # "right"|"left"|"top"|"bottom"
         style: str = "solid",       # "solid" | "dashed"
         color: Optional[str] = None,
         width: float = 2.0,
         offset: float = 0.0,        # shift the centre line (e.g. upward loopback)
     ) -> int:
-        """Panah ortogonal antar node (S-03) — pengganti vektor ad-hoc.
+        """Orthogonal arrow between nodes (S-03) — replaces ad-hoc vectors.
 
         Anchor at the side midpoint; one-bend Manhattan route; the arrow
         head follows the last segment. The network uses raw pixels (not the

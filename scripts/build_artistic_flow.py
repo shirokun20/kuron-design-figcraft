@@ -158,11 +158,10 @@ def resolve_tree_layout(doc_nodes, root_id):
                     c["height"] = max(10.0, h_per_fill)
                     resolve_node(c["id"], c["width"], c["height"])
 
-            # main_align vertikal: cermin cabang horizontal (paritas engine —
-            # engine live memusatkan/memaksimalkan/menyebar blok vertikal;
-            # reflow lama selalu top-pin hingga save-app menggeser 95 wadah).
+            # Vertical main_align mirrors the horizontal branch (engine parity:
+            # the live engine centres, maximises, and spreads vertical blocks;
+            # the old reflow always top-pinned until a save moved 95 frames).
             tot_children_h = sum(doc_nodes[str(cid)]["height"] for cid in children_ids)
-            # CATAT 2026-11-08: spaceBetween vertikal SENGAJA tak di mirror.
             # NOTE 2026-11-08: vertical spaceBetween is deliberately NOT
             # mirrored. Evidence: the engine renders Panel1-02 (spaceBetween)
             # pinned to the top (= min), while Panel1-01 in the middle is a
@@ -236,7 +235,7 @@ def resolve_tree_layout(doc_nodes, root_id):
 
             # Wrap: split children into several lines when they exceed inner_w
             # (engine parity — without this, a wrapped line collapses to 1 line,
-            # mis. ScChecks: chip_1295 meleset 540px).
+            # e.g. ScChecks: chip_1295 was off by 540px).
             wrap = bool(node.get("layout", {}).get("wrap", False))
             cross_gap = float(node.get("layout", {}).get("cross_gap", gap))
             lines: list = []

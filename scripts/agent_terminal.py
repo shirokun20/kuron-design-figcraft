@@ -27,6 +27,9 @@ from design_manifest import load_design  # noqa: E402
 DEFAULT_PORT = 9880
 PID_FILE = os.path.join(os.getcwd(), ".figcraft.pid")
 PORT_FILE = os.path.join(os.getcwd(), ".figcraft.port")
+# Port metadata also records the file that start/open made active, so reload
+# and watch never fall back to a different (possibly stale) document.
+ACTIVE_FILE = os.path.join(os.getcwd(), ".figcraft.active.json")
 # Platform default only; override with FIGCRAFT_APP for other install locations.
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
@@ -80,6 +83,48 @@ def resolve_design_path(path: Optional[str] = None) -> str:
     if root is not None:
         return os.path.join(root, p)
     return os.path.abspath(p)
+
+
+def read_active_file() -> Optional[str]:
+    """Return the absolute path of the session's active .figcraft file, if any."""
+    try:
+        with open(ACTIVE_FILE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return None
+    path = data.get("active_file") if isinstance(data, dict) else None
+    return path if isinstance(path, str) and path else None
+
+
+def write_active_file(path: Optional[str]) -> None:
+    """Persist the active .figcraft path for later reload/watch commands."""
+    if not path:
+        return
+    try:
+        with open(ACTIVE_FILE, "w", encoding="utf-8") as handle:
+            json.dump({"active_file": resolve_design_path(path)}, handle)
+    except OSError as exc:
+        print("Warning: could not persist active file: %s" % exc, file=sys.stderr)
+
+
+def clear_active_file() -> None:
+    """Forget the active file when a session is stopped."""
+    try:
+        if os.path.exists(ACTIVE_FILE):
+            os.remove(ACTIVE_FILE)
+    except OSError:
+        pass
+
+
+def effective_design_path(path: Optional[str] = None) -> Optional[str]:
+    """Resolve an explicit path, else the persisted active file, else None.
+
+    Never substitutes ``DEFAULT_DESIGN_REL`` here: a silent workbench fallback
+    is exactly what caused stale exports after another file was opened.
+    """
+    if path:
+        return resolve_design_path(path)
+    return read_active_file()
 
 
 def _unwrap_inspect(payload: Any) -> Any:
@@ -309,10 +354,13 @@ class FigcraftTerminal:
     def start_server(self, file_path: Optional[str] = None, wait_ready: bool = True) -> Dict[str, Any]:
         """Launch FigCraft with the requested control port and automation flags."""
         if self.is_port_listening():
+            if file_path:
+                write_active_file(file_path)
             return {
                 "ok": True,
                 "status": "already_running",
                 "port": self.port,
+                "file": resolve_design_path(file_path) if file_path else read_active_file(),
                 "message": f"FigCraft control port {self.port} is already active and responsive."
             }
 
@@ -345,6 +393,8 @@ class FigcraftTerminal:
             f.write(str(proc.pid))
         with open(PORT_FILE, "w") as f:
             f.write(str(self.port))
+        if file_path:
+            write_active_file(file_path)
 
         if wait_ready:
             start_time = time.time()
@@ -397,6 +447,7 @@ class FigcraftTerminal:
                     os.remove(fpath)
                 except Exception:
                     pass
+        clear_active_file()
 
         return {
             "ok": True,
@@ -513,23 +564,44 @@ class FigcraftTerminal:
                     "top_keys": _top_keys(tree)}
         return {"ok": True, "node": summarize_node(node)}
 
-    def reload_file(self, file_path: Optional[str] = None, mode: str = "soft") -> Dict[str, Any]:
-        """Reload a file: soft refresh when supported, else legacy close+open fallback.
+    def open_file(self, file_path: str) -> Dict[str, Any]:
+        """Open a file and record it as the session's active document."""
+        if not file_path:
+            return {"ok": False, "error": "No .figcraft file supplied to open."}
+        abs_p = resolve_design_path(file_path)
+        res = self.execute_command("file.open", {"path": abs_p})
+        if isinstance(res, dict) and res.get("ok", True) and not res.get("error"):
+            write_active_file(abs_p)
+            out = dict(res)
+            out["active_file"] = abs_p
+            return out
+        return res
 
-        mode="soft" (default) tries an in-place refresh without force-closing the
-        tab and falls back to the legacy behavior with "fallback": true when the
-        engine does not support it. mode="hard" always uses legacy close+open.
-        A soft path that the engine rejects is NOT fatal — it falls back.
+    def reload_file(self, file_path: Optional[str] = None, mode: str = "soft") -> Dict[str, Any]:
+        """Reload the active (or explicitly supplied) file from disk.
+
+        With no path, the file persisted by ``start``/``open`` is used; there is
+        no silent workbench fallback. mode="soft" tries refresh-style commands
+        and falls back to close+open for that SAME target. A failed fallback is
+        reported as ``ok=False`` so the CLI exits non-zero instead of letting a
+        session export a stale document.
         """
-        p = resolve_design_path(file_path)
+        p = effective_design_path(file_path)
+        if not p:
+            return {"ok": False, "error": "No active .figcraft file is known; "
+                    "pass a file path or run start/open first."}
         if mode == "hard":
             self.execute_command("file.close", {"force": True})
             res = self.execute_command("file.open", {"path": p})
-            if isinstance(res, dict):
-                res = dict(res)
-                res["fallback"] = False
-            return res
-        # Soft: try refresh-style engine commands first.
+            out = dict(res) if isinstance(res, dict) else {
+                "ok": False, "error": "empty engine response"}
+            out["fallback"] = False
+            out["mode"] = "hard"
+            out["file"] = p
+            if out.get("ok") and not out.get("error"):
+                write_active_file(p)
+            return out
+
         soft_attempts = [
             ("file.reload", {"path": p}),
             ("file.refresh", {"path": p}),
@@ -546,15 +618,21 @@ class FigcraftTerminal:
                 out = dict(res)
                 out["fallback"] = False
                 out["mode"] = "soft"
+                out["file"] = p
+                write_active_file(p)
                 return out
             last = res
-        # Fallback to legacy behavior; not fatal.
+        # Fallback is allowed only for the same intended target.
         self.execute_command("file.close", {"force": True})
         res = self.execute_command("file.open", {"path": p})
-        out = dict(res) if isinstance(res, dict) else {"ok": False, "error": "empty engine response"}
+        out = dict(res) if isinstance(res, dict) else {
+            "ok": False, "error": "empty engine response"}
         out["fallback"] = True
         out["mode"] = "soft"
         out["soft_error"] = last
+        out["file"] = p
+        if out.get("ok") and not out.get("error"):
+            write_active_file(p)
         return out
 
     def watch_file(self, file_path: Optional[str] = None, out_dir: str = ".",
@@ -564,10 +642,15 @@ class FigcraftTerminal:
                    max_seconds: float = MAX_WATCH_SECONDS) -> Dict[str, Any]:
         """Poll mtime; on each change run soft reload + export-all (stdlib only).
 
+        Uses the persisted active file when no path is given. A failed reload
+        stops the watch with ``ok=False`` and never exports a stale document.
         Stops on Ctrl-C, on ``max_events`` changes, or after ``max_seconds`` —
         every watch session is bounded (cut-loop guard).
         """
-        p = resolve_design_path(file_path)
+        p = effective_design_path(file_path)
+        if not p:
+            return {"ok": False, "events": 0, "file": None, "stop": "no_active_file",
+                    "error": "No active .figcraft file is known; pass a file path or run start/open first."}
         last_mtime: Optional[float] = None
         try:
             last_mtime = os.path.getmtime(p)
@@ -591,6 +674,17 @@ class FigcraftTerminal:
                     last_mtime = mtime
                     events += 1
                     reload_res = self.reload_file(p, mode="soft")
+                    if not reload_res.get("ok"):
+                        failure = {"event": events, "file": p, "reload": reload_res,
+                                   "export": None,
+                                   "error": "Reload failed; refusing to export a stale document."}
+                        errors.append(failure)
+                        if on_event is not None:
+                            on_event(failure)
+                        else:
+                            print(json.dumps(failure))
+                        stop_reason = "reload_failed"
+                        break
                     export_res = self.export_all(out_dir, fmt=fmt, scale=scale, prefix=prefix)
                     info = {"event": events, "file": p,
                             "reload": reload_res, "export": export_res}
@@ -600,11 +694,12 @@ class FigcraftTerminal:
                         print(json.dumps(info))
         except KeyboardInterrupt:
             stop_reason = "interrupted"
-        if events >= max(1, max_events):
-            stop_reason = "max_events"
-        elif time.monotonic() >= deadline:
-            stop_reason = "max_seconds"
-        summary = {"ok": True, "events": events, "file": p, "stop": stop_reason,
+        if stop_reason == "completed":
+            if events >= max(1, max_events):
+                stop_reason = "max_events"
+            elif time.monotonic() >= deadline:
+                stop_reason = "max_seconds"
+        summary = {"ok": not errors, "events": events, "file": p, "stop": stop_reason,
                    "out_dir": os.path.abspath(out_dir), "errors": errors}
         return summary
 
@@ -617,14 +712,15 @@ REPL_HELP = (
     "  status                 Check socket health and active document\n"
     "  inspect                Raw document.inspect output\n"
     "  frames                 List screen-level frames (id, name, x/y/w/h)\n"
-    "  open <path>            Open a file in running FigCraft\n"
-    "  reload [--soft|--hard] [file]  Reload file (default --soft with fallback)\n"
+    "  open <path>            Open a file in running FigCraft (becomes the active file)\n"
+    "  reload [--soft|--hard] [file]  Reload file (default --soft; uses the active file,\n"
+    "                         fails non-zero if reload fails)\n"
     "  export <id> <path>     Export one node to image\n"
     "  export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"]\n"
     "                         Export all frames to a directory\n"
     "  diff <id>              Show property summary of one node\n"
     "  exec <cmd> [json]      Execute an engine command\n"
-    "  watch <file> -o <dir>  Poll mtime; reload+export on change (Ctrl-C stops)\n"
+    "  watch [file] -o <dir>  Poll mtime; reload+export on change (active file by default)\n"
     "  history                Show session command history (!n re-runs entry n)\n"
     "  help [cmd]             This help, or per-command help\n"
     "  quit                   Exit the REPL"
@@ -634,13 +730,13 @@ REPL_CMD_HELP: Dict[str, str] = {
     "status": "status — check socket health and active document. No arguments.",
     "inspect": "inspect — print raw document.inspect output. No arguments.",
     "frames": "frames — list screen-level frames via document.inspect: id, name, x/y/w/h.",
-    "open": "open <path> — open a .figcraft file in running FigCraft.",
-    "reload": "reload [--soft|--hard] [file] — default --soft tries refresh without force-closing the tab, falls back to close+open with \"fallback\": true. --hard always closes+opens.",
+    "open": "open <path> — open a .figcraft file in running FigCraft and make it the active file.",
+    "reload": "reload [--soft|--hard] [file] — default --soft tries refresh without force-closing the tab, falls back to close+open with \"fallback\": true. Without a path it uses the file made active by start/open, and fails if no file is known or the reload fails. --hard always closes+opens.",
     "export": "export <id> <path> — export one node to an image file.",
     "export-all": "export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] — export every frame to <dir>/<slug>.<ext>.",
     "diff": "diff <id> — property summary (id, name, type, x/y/w/h, fill/stroke/text) for verifying mutations.",
     "exec": "exec <cmd> [json] — execute an engine command, e.g. exec file.save '{\"path\": \"out.figcraft\"}'.",
-    "watch": "watch <file> -o <dir> [--debounce 0.5] [--format png] — poll mtime, reload soft + export-all on change. Ctrl-C stops.",
+    "watch": "watch [file] -o <dir> [--debounce 0.5] [--format png] — poll mtime (active file by default), reload soft + export-all on change. A failed reload stops the watch without exporting. Ctrl-C stops.",
     "history": "history — show session history. Use !n to re-run entry n.",
     "help": "help [cmd] — overall help or per-command help, e.g. help export-all.",
     "quit": "quit — exit the REPL (also: exit).",
@@ -671,8 +767,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # reload
     p_rel = sub.add_parser("reload", help="Reload file from disk (default --soft with fallback to close+open)")
-    p_rel.add_argument("file", nargs="?", default=DEFAULT_DESIGN_REL,
-                       help=f"File to reload (resolved vs repo root; default: {DEFAULT_DESIGN_REL})")
+    p_rel.add_argument("file", nargs="?", default=None,
+                       help="File to reload (default: the file made active by start/open; fails if none)")
     grp = p_rel.add_mutually_exclusive_group()
     grp.add_argument("--soft", dest="mode", action="store_const", const="soft",
                      help="Refresh without force-closing the tab; fall back if unsupported (default)")
@@ -711,7 +807,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     # watch
     p_watch = sub.add_parser("watch", help="Poll file mtime; on change run soft reload + export-all (Ctrl-C stops)")
-    p_watch.add_argument("file", help="File to watch (resolved vs repo root if relative)")
+    p_watch.add_argument("file", nargs="?", default=None,
+                         help="File to watch (default: the active file from start/open; fails if none)")
     p_watch.add_argument("--out", "-o", required=True, help="Export directory for export-all on each change")
     p_watch.add_argument("--debounce", type=float, default=0.5, help="Poll interval in seconds (default: 0.5)")
     p_watch.add_argument("--format", default="png", choices=["png", "svg", "pdf", "webp"],
@@ -755,13 +852,14 @@ def main():
         print(json.dumps(res, indent=2))
 
     elif args.cmd == "open":
-        abs_p = resolve_design_path(args.file)
-        res = term.execute_command("file.open", {"path": abs_p})
+        res = term.open_file(args.file)
         print(json.dumps(res, indent=2))
+        sys.exit(0 if res.get("ok") and not res.get("error") else 1)
 
     elif args.cmd == "reload":
         res = term.reload_file(args.file, mode=args.mode)
         print(json.dumps(res, indent=2))
+        sys.exit(0 if res.get("ok") and not res.get("error") else 1)
 
     elif args.cmd == "exec":
         try:
@@ -803,6 +901,7 @@ def main():
         except KeyboardInterrupt:
             res = {"ok": True, "events": 0, "interrupted": True}
         print(json.dumps(res, indent=2))
+        sys.exit(0 if res.get("ok") else 1)
 
     elif args.cmd == "harness-info":
         design = load_design()
@@ -860,7 +959,7 @@ def main():
             elif action == "frames":
                 print(json.dumps(term.list_frames(), indent=2))
             elif action == "open" and len(parts) > 1:
-                print(json.dumps(term.execute_command("file.open", {"path": resolve_design_path(parts[1])}), indent=2))
+                print(json.dumps(term.open_file(parts[1]), indent=2))
             elif action == "reload":
                 toks = parts[1:] + (parts[2].split() if len(parts) > 2 else [])
                 mode = "soft"
@@ -872,7 +971,12 @@ def main():
                         mode = "hard"
                     elif not t.startswith("--"):
                         target = t
-                print(json.dumps(term.reload_file(target or DEFAULT_DESIGN_REL, mode=mode), indent=2))
+                target = target or read_active_file()
+                if not target:
+                    print(json.dumps({"ok": False, "error": "No active .figcraft file; "
+                                      "run start/open or pass a file path."}, indent=2))
+                    return
+                print(json.dumps(term.reload_file(target, mode=mode), indent=2))
             elif action == "export" and len(parts) > 2:
                 print(json.dumps(term.export_frame(int(parts[1]), parts[2]), indent=2))
             elif action == "export-all" and len(parts) > 1:
@@ -979,8 +1083,10 @@ def main():
                         i += 1
                     else:
                         i += 1
+                wfile = wfile or read_active_file()
                 if not wfile or not wout:
-                    print(json.dumps({"ok": False, "error": "Usage: watch <file> -o <dir> [--debounce 0.5] [--format png]"}))
+                    print(json.dumps({"ok": False, "error": "No active .figcraft file and no watch target; "
+                                      "run start/open or pass a file path."}))
                     continue
                 try:
                     summary = term.watch_file(wfile, out_dir=wout, debounce=deb,

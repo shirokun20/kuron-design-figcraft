@@ -217,7 +217,9 @@ the text-measurement layout helper.
   engine. `figcraft-cli`, when installed, is an optional headless arbiter.
 - PNG preview/export needs the FigCraft app available locally. Set
   `FIGCRAFT_APP` for non-default installs; headless token/lint/builder work
-  does not need the app.
+  does not need the app. `quick_design.py --preview` renders through the live
+  bridge when it can and otherwise reports "Preview not generated" — it never
+  claims a PNG that was not written.
 - Port `9880` may be occupied by another agent. Check `status` first, run
   `stop`, and pass `--port` to use a different control port.
 - Only one process may write a given `.figcraft` file at a time; `watch` is

@@ -64,8 +64,8 @@ Run all commands from the package root.
 | `status` | Check socket health and active document | `--port 9880 status` |
 | `open` | Open another file in the running instance | `--port 9880 open out/other.figcraft` |
 | `frames` | List screen-level frames (`id`, `name`, `x/y/w/h`); `--json` | `--port 9880 frames` |
-| `reload` | `--soft` (default, safe) or `--hard` (forced) | `--port 9880 reload --soft` |
-| `watch` | Watch mtime → auto reload + export-all | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
+| `reload` | `--soft` (default, safe) or `--hard` (forced); uses the active file when no path is given | `--port 9880 reload --soft` |
+| `watch` | Watch mtime → auto reload + export-all; uses the active file when no path is given | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
 | `exec` | Direct JSON-RPC engine command | `--port 9880 exec select.set '{"ids": [10]}'` |
 | `diff` | Summarise one node's properties | `--port 9880 diff --id <ID>` |
 | `export` | Export ONE frame (`--id`, `-o`, `--format`, `--scale`) | `--port 9880 export --id <ID> -o out/previews/01.png --scale 2` |
@@ -74,11 +74,15 @@ Run all commands from the package root.
 | `harness-info` | JSON manifest of harness capabilities | `--port 9880 harness-info` |
 | `stop` | Stop the FigCraft process | `--port 9880 stop` |
 
+`start` and `open` persist the active `.figcraft` path; `reload` and `watch`
+use it when no path is supplied and fail explicitly if none is known. A failed
+reload exits non-zero and `watch` stops without exporting a stale document.
+
 Example manifest:
 
 ```bash
 python3 scripts/agent_terminal.py --port 9880 harness-info
-# => {"name": "kuron-design-figcraft", "version": "3.0.0", ...}
+# => {"name": "kuron-design-figcraft", "version": "3.1.0", ...}
 ```
 
 ---

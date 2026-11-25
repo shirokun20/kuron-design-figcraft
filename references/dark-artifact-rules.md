@@ -73,7 +73,7 @@ the contract, no "roughly nice" numbers.
 | Pipeline bar | `build_pipeline_bar` | flow stages, arrow `→`, active stage in `action-primary` on soft tint |
 | Connector | `build_connector` | raw pixel network, Manhattan routing, automatic arrowheads |
 
-> **Script contract (next phase):** builders must not carry a frozen
+> **Script contract (active in `3.1.0`):** builders must not carry a frozen
 > colour/size dictionary. `TOKENS` must be resolved from the project's
 > `DESIGN.md` at build time. Builder names above stay stable; values are dynamic.
 

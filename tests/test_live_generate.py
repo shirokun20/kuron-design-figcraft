@@ -109,6 +109,58 @@ class RenderAuditDetectionTests(unittest.TestCase):
                 os.remove(path)
         self.assertEqual(failures, [], "\n".join(failures))
 
+    def test_empty_full_size_body_is_not_counted_as_content(self):
+        doc = FigcraftDocument("hollow")
+        screen = doc.create_frame("01. Empty", 1, 1280.0, 960.0,
+                                  fill=TOKENS["colors"]["bg"], clip=True)
+        doc.create_frame("Body", screen, 1280.0, 928.0,
+                         sizing_h="fill", sizing_v="fill")
+        fd, path = tempfile.mkstemp(suffix=".figcraft")
+        os.close(fd)
+        try:
+            doc.save(path)
+            failures = audit_render.audit_file(path)
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+        self.assertTrue(any("S-06" in failure and "utilisation 0%" in failure
+                            for failure in failures),
+                        "an empty wrapper must not score as content: %s" % failures)
+
+    def test_visible_leaf_content_is_counted_at_full_utilisation(self):
+        doc = FigcraftDocument("filled")
+        screen = doc.create_frame("01. Filled", 1, 1280.0, 960.0,
+                                  fill=TOKENS["colors"]["bg"], clip=True)
+        body = doc.create_frame("Body", screen, 1280.0, 928.0,
+                                sizing_h="fill", sizing_v="fill")
+        doc.create_rect("RealContent", body, 1200.0, 850.0,
+                        fill=TOKENS["colors"]["raised"])
+        fd, path = tempfile.mkstemp(suffix=".figcraft")
+        os.close(fd)
+        try:
+            doc.save(path)
+            failures = audit_render.audit_file(path)
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+        self.assertFalse([f for f in failures if "S-06" in f], failures)
+
+    def test_all_live_presets_meet_canvas_utilisation(self):
+        for kind in KINDS:
+            with self.subTest(kind=kind):
+                doc = qd.generate_live(kind, "audit-%s" % kind)
+                fd, path = tempfile.mkstemp(suffix=".figcraft")
+                os.close(fd)
+                try:
+                    doc.save(path)
+                    failures = audit_render.audit_file(path)
+                finally:
+                    if os.path.exists(path):
+                        os.remove(path)
+                self.assertFalse([f for f in failures if "S-06" in f], failures)
+                self.assertFalse([f for f in failures if "overflows" in f
+                                  or "dead space" in f], failures)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,73 @@ def frame_box(node: Dict[str, Any]):
     return transform[4], transform[5], node.get("width", 0), node.get("height", 0)
 
 
+# Leaf types are the only shapes that occupy visible pixels on their own. A
+# full-size layout wrapper (Body, Canvas, Card grid, ...) is not content just
+# because it has a bounding box.
+CONTENT_TYPES = {"text", "rectangle", "vector", "ellipse"}
+
+
+def is_visible_content(node: Dict[str, Any]) -> bool:
+    """Whether a node itself paints visible content (not a layout wrapper)."""
+    if node.get("visible") is False or node.get("type") not in CONTENT_TYPES:
+        return False
+    return first_paint_hex(node) is not None
+
+
+def absolute_box(nodes: Dict[str, Any], node_id: Any):
+    """Accumulate local transforms up to the screen for a descendant node.
+
+    Child transforms are stored relative to their parent frame, so summing the
+    ancestor chain (bounded by ``MAX_ANCESTOR_STEPS``) yields canvas-relative
+    coordinates suitable for a utilisation calculation.
+    """
+    x = y = 0.0
+    current = str(node_id)
+    width = height = 0.0
+    seen = set()
+    for step in range(MAX_ANCESTOR_STEPS):
+        if current in seen:
+            break
+        seen.add(current)
+        node = nodes.get(current)
+        if not isinstance(node, dict):
+            break
+        tx, ty, node_w, node_h = frame_box(node)
+        x += tx
+        y += ty
+        if step == 0:
+            width, height = node_w, node_h
+        parent = node.get("parent")
+        if parent is None or str(parent) == current or str(parent) == "1":
+            return x, y, width, height
+        current = str(parent)
+    return x, y, 0.0, 0.0
+
+
+def content_bounds(nodes: Dict[str, Any], screen_id: Any):
+    """Bounding box of visible leaf content in a screen's subtree.
+
+    Returns ``(x0, y0, x1, y1)`` or ``None`` when the screen holds no visible
+    leaf content — an empty full-size wrapper therefore scores zero, not 100%.
+    """
+    xs0, ys0, xs1, ys1 = [], [], [], []
+    for nid in subtree(nodes, screen_id):
+        if nid == str(screen_id):
+            continue
+        node = nodes.get(nid)
+        if not isinstance(node, dict) or not is_visible_content(node):
+            continue
+        x, y, w, h = absolute_box(nodes, nid)
+        if w > 0 and h > 0:
+            xs0.append(x)
+            ys0.append(y)
+            xs1.append(x + w)
+            ys1.append(y + h)
+    if not xs0:
+        return None
+    return min(xs0), min(ys0), max(xs1), max(ys1)
+
+
 def first_paint_hex(node: Dict[str, Any]) -> Optional[str]:
     """Return the first visible solid paint colour of a node, if any."""
     for key in ("fills", "strokes"):
@@ -117,22 +184,18 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any) -> None:
     children = [nodes[str(c)] for c in screen.get("children", [])
                 if str(c) in nodes]
 
-    # Canvas utilisation: bounding box of real content vs the screen frame.
-    xs0, ys0, xs1, ys1 = [], [], [], []
-    for child in children:
-        if child.get("type") not in ("frame", "rectangle", "text", "vector"):
-            continue
-        x, y, w, h = frame_box(child)
-        if w > 0 and h > 0:
-            xs0.append(x)
-            ys0.append(y)
-            xs1.append(x + w)
-            ys1.append(y + h)
-    if xs0:
-        utilisation = ((max(xs1) - min(xs0)) * (max(ys1) - min(ys0))) / (width * height)
+    # Canvas utilisation: bounding box of visible leaf content vs the screen
+    # frame. Empty layout wrappers (Body, Canvas, ...) never count as content.
+    bounds = content_bounds(nodes, screen_id)
+    if bounds is None:
+        note(name, "S-06", "canvas utilisation 0% < 60% (no visible leaf content)")
+    else:
+        content_left, content_top, content_right, content_bottom = bounds
+        utilisation = ((content_right - content_left)
+                       * (content_bottom - content_top)) / (width * height)
         if utilisation < 0.60:
             note(name, "S-06", "canvas utilisation %.0f%% < 60%%" % (utilisation * 100))
-        if y0 + height - max(ys1) > 150 and "Flow" not in str(name):
+        if y0 + height - content_bottom > 150 and "Flow" not in str(name):
             note(name, "S-06", "more than 150px of dead space at the bottom")
 
     # Clipping: a screen frame must contain its own content.

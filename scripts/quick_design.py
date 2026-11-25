@@ -11,9 +11,7 @@ All network operations use timeouts; the preview worker is always terminated.
 
 import argparse
 import os
-import subprocess
 import sys
-import time
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -371,10 +369,34 @@ def tokr(role_or_scale: str) -> float:
 # ---------------------------------------------------------------------------
 # LIVE GENERATE — Components / Screen / Form, driven by style_direction
 # ---------------------------------------------------------------------------
+def retarget_duplicate_label(doc: FigcraftDocument, node_id: Optional[int],
+                             label: str, color: Optional[str] = None) -> None:
+    """Update the text label inside a duplicated button/badge subtree.
+
+    Only the fresh copy is touched; the source template is never mutated. The
+    text keeps hug sizing so save-time auto-layout measures the new copy and
+    resizes the duplicated control to fit it.
+    """
+    if node_id is None:
+        return
+    root = doc.doc["nodes"].get(str(node_id), {})
+    for child_id in root.get("children", []) or []:
+        child = doc.doc["nodes"].get(str(child_id), {})
+        if child.get("type") != "text" or child.get("name") not in ("label", "text"):
+            continue
+        child["characters"] = label
+        # The node keeps its hug sizing; save-time reflow measures the new copy
+        # and resizes the parent control, so no pre-emptive width is stored.
+        if color:
+            child["fills"] = ft.make_solid_fill(color)
+        return
+
+
 def generate_components(doc: FigcraftDocument, parent_id: int = 1,
                         style: Optional[str] = None) -> int:
     """Build a component library by duplicating base components (refine, not rebuild)."""
     lever = levers(style)
+    content_w = SCREEN_W - SPACE["xl"] * 2
     root = doc.create_frame(
         "Components", parent_id, SCREEN_W, SCREEN_H,
         fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
@@ -386,18 +408,47 @@ def generate_components(doc: FigcraftDocument, parent_id: int = 1,
                     font_size=TYPE["display"], font_weight="Bold",
                     font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
 
-    row = doc.create_frame("ButtonVariants", root, SCREEN_W - SPACE["xl"] * 2,
-                           TOKENS["sizes"]["btn_lg"] + SPACE["md"],
-                           layout_mode="horizontal", gap=lever["gap"],
-                           cross_align="center", sizing_h="fill", sizing_v="hug")
-    base = doc.build_button("BtnBase", text("submit"), row, variant="primary", size="md")
-    doc.component_first(base, row, name="BtnSecondary",
-                        overrides={"fills": ft.make_solid_fill(TOKENS["colors"]["surface-2"])})
-    doc.component_first(base, row, name="BtnGhost",
-                        overrides={"fills": []})
-    doc.build_badge("BadgeTechnical", "ID 42", row, tone="data-technical")
-    doc.build_badge("BadgePrimary", text("status"), row, tone="action-primary")
-    doc.build_badge("BadgeSuccess", text("status"), row, tone="status-success")
+    buttons = doc.create_frame(
+        "ButtonVariants", root, content_w, TOKENS["sizes"]["btn_lg"] + SPACE["md"],
+        layout_mode="horizontal", gap=lever["gap"], main_align="spaceBetween",
+        cross_align="center", sizing_h="fill", sizing_v="fixed")
+    primary = doc.build_button("BtnPrimary", text("submit"), buttons,
+                               variant="primary", size="md")
+    secondary = doc.component_first(
+        primary, buttons, name="BtnSecondary",
+        overrides={"fills": ft.make_solid_fill(TOKENS["colors"]["surface-2"])})
+    retarget_duplicate_label(doc, secondary, text("save_changes"),
+                             TOKENS["colors"]["text"])
+    ghost = doc.component_first(primary, buttons, name="BtnGhost",
+                                overrides={"fills": []})
+    retarget_duplicate_label(doc, ghost, text("cancel"),
+                             TOKENS["colors"]["text-2"])
+
+    badges = doc.create_frame(
+        "BadgeVariants", root, content_w,
+        float(COMPONENT["badge"]["height"]) + SPACE["md"],
+        layout_mode="horizontal", gap=lever["gap"], main_align="spaceBetween",
+        cross_align="center", sizing_h="fill", sizing_v="fixed")
+    success = doc.build_badge("BadgeSuccess", text("status_ready"), badges,
+                              tone="status-success")
+    danger = doc.component_first(
+        success, badges, name="BadgeDanger",
+        overrides={"fills": ft.make_solid_fill(TOKENS["colors"]["status-danger-soft"])})
+    retarget_duplicate_label(doc, danger, text("status_error"),
+                             TOKENS["colors"]["status-danger"])
+
+    # A fill spacer pushes the specimen footer to the bottom so real content
+    # (not an empty wrapper) spans the whole canvas.
+    doc.create_frame("LibrarySpacer", root, content_w, SPACE["xs"],
+                     sizing_h="fill", sizing_v="fill")
+    footer = doc.create_frame(
+        "LibraryFooter", root, content_w, TYPE["body"] + SPACE["md"],
+        layout_mode="horizontal", gap=lever["gap"], main_align="spaceBetween",
+        cross_align="center", sizing_h="fill", sizing_v="fixed")
+    doc.create_text("FooterBrand", text("app_name"), footer,
+                    font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"])
+    doc.create_text("FooterContext", text("project_dashboard"), footer,
+                    font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"])
     doc.prevent_clipping(root)
     return root
 
@@ -430,6 +481,11 @@ def generate_form(doc: FigcraftDocument, parent_id: int = 1,
         )
         doc.create_text("Label", text(key), field, font_size=TYPE["body"],
                         color=TOKENS["colors"]["text-2"])
+    # Fill spacer keeps the actions near the bottom so visible leaf content
+    # spans the canvas instead of clustering under the title.
+    doc.create_frame("FormSpacer", root,
+                     max(SPACE["xl"] * 4, form_w - SPACE["xl"] * 2), SPACE["xs"],
+                     sizing_h="fill", sizing_v="fill")
     actions = doc.create_frame("FormActions", root,
                                max(SPACE["xl"] * 4, form_w - SPACE["xl"] * 2),
                                TOKENS["sizes"]["btn_md"] + SPACE["sm"],
@@ -490,41 +546,59 @@ def generate_screen(doc: FigcraftDocument, x: float = 0.0, y: float = 0.0,
                               layout_mode="vertical", gap=lever["gap"],
                               padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
                               sizing_h="fill", sizing_v="fill")
+    inner_w = max(SPACE["xl"] * 4, canvas_w - lever["pad"] * 2)
+    canvas_h = SCREEN_H - TOKENS["sizes"]["header"]
+    grid_h = canvas_h - lever["pad"] * 2
     if style in ("clean_utility", "custom"):
-        generate_form(doc, canvas, style=style,
-                      width=canvas_w - lever["pad"] * 2,
+        generate_form(doc, canvas, style=style, width=inner_w,
                       height=SCREEN_H - TOKENS["sizes"]["header"] - lever["pad"] * 2)
     elif style == "editorial":
         doc.create_text("ArticleTitle", text("screen"), canvas,
                         font_size=TYPE["display"], font_weight="Bold",
                         font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
+        article_w = min(SCREEN_W / 2.0, inner_w)
         doc.create_text("ArticleBody", text("empty_desc"), canvas,
                         font_size=TYPE["body"], color=TOKENS["colors"]["text-2"],
-                        width=SCREEN_W / 2.0, max_w=SCREEN_W / 2.0)
+                        width=article_w, max_w=article_w)
+        doc.create_frame("ArticleSpacer", canvas, inner_w, SPACE["xs"],
+                         sizing_h="fill", sizing_v="fill")
+        footer = doc.create_frame(
+            "ArticleFooter", canvas, inner_w, TYPE["body"] + SPACE["md"],
+            layout_mode="horizontal", gap=lever["gap"], main_align="spaceBetween",
+            cross_align="center", sizing_h="fill", sizing_v="fixed")
+        doc.create_text("FooterBrand", text("app_name"), footer,
+                        font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"])
+        doc.create_text("FooterContext", text("project_dashboard"), footer,
+                        font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"])
     else:
-        grid = doc.create_frame("Cards", canvas,
-                                max(SPACE["xl"] * 4, canvas_w - lever["pad"] * 2),
-                                SCREEN_H / 2.0, layout_mode="horizontal",
-                                gap=lever["gap"], sizing_h="fill", sizing_v="hug")
+        grid = doc.create_frame(
+            "Cards", canvas, inner_w, grid_h, layout_mode="horizontal",
+            gap=lever["gap"], main_align="spaceBetween",
+            sizing_h="fill", sizing_v="fixed")
         for index in range(lever["columns"]):
             card_w = max(SPACE["xl"] * 4,
-                         (canvas_w - lever["pad"] * 2 - lever["gap"]
-                          * (lever["columns"] - 1)) / lever["columns"])
-            card = doc.create_frame("Card_%d" % index, grid, card_w,
-                                    SCREEN_H / 3.0,
-                                    fill=TOKENS["colors"]["raised"],
-                                    stroke=TOKENS["colors"]["line"],
-                                    corner_radius=tokr("card"),
-                                    layout_mode="vertical", gap=lever["gap"],
-                                    padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
-                                    sizing_h="fill", sizing_v="fixed")
+                         (inner_w - lever["gap"] * (lever["columns"] - 1))
+                         / lever["columns"])
+            card = doc.create_frame(
+                "Card_%d" % index, grid, card_w, grid_h,
+                fill=TOKENS["colors"]["raised"], stroke=TOKENS["colors"]["line"],
+                corner_radius=tokr("card"), layout_mode="vertical", gap=lever["gap"],
+                padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
+                sizing_h="fill", sizing_v="fixed")
             doc.create_text("CardTitle", text("card"), card,
                             font_size=TYPE["heading"], font_weight="Bold",
                             color=TOKENS["colors"]["text"])
+            body_w = max(SPACE["xl"] * 2, card_w - lever["pad"] * 2)
             doc.create_text("CardBody", text("empty_desc"), card,
                             font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"],
-                            width=max(SPACE["xl"] * 2, card_w - lever["pad"] * 2),
-                            max_w=max(SPACE["xl"] * 2, card_w - lever["pad"] * 2))
+                            width=body_w, max_w=body_w)
+            doc.create_frame("CardSpacer", card,
+                             max(SPACE["xs"], card_w - lever["pad"] * 2), SPACE["xs"],
+                             sizing_h="fill", sizing_v="fill")
+            doc.create_text(
+                "CardFooter",
+                text("status_ready") if index % 2 == 0 else text("status_error"),
+                card, font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"])
     doc.prevent_clipping(screen_id)
     return screen_id
 
@@ -633,6 +707,76 @@ def generate_preset(preset_name: str, doc_name: str = "QuickDesign") -> Figcraft
 # ---------------------------------------------------------------------------
 # CLI + AUTO-RENDER PREVIEW
 # ---------------------------------------------------------------------------
+def preview_app_binary() -> str:
+    """Return the FigCraft binary used for headless preview rendering."""
+    return os.environ.get("FIGCRAFT_APP",
+                          "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
+
+
+def export_preview(output_path: str, port: int = 9880) -> bool:
+    """Render ``<name>_preview.png`` through the live FigCraft bridge.
+
+    Returns True only when a PNG was actually written. Every path — missing
+    binary, failed launch, bad RPC, failed export — ends with an honest status
+    line. A process started here is always stopped and the socket always
+    closed, so no child or connection is leaked.
+    """
+    out_base, _ = os.path.splitext(output_path)
+    preview_png = out_base + "_preview.png"
+    abs_fig = os.path.abspath(output_path)
+    abs_png = os.path.abspath(preview_png)
+    app_bin = preview_app_binary()
+    if not os.path.exists(app_bin):
+        print("Preview not generated: FigCraft binary unavailable at %s "
+              "(set FIGCRAFT_APP). The .figcraft file is ready; no PNG was "
+              "rendered." % app_bin)
+        return False
+
+    from agent_terminal import FigcraftTerminal  # lazy, stdlib-only sibling
+
+    term = FigcraftTerminal(port=port)
+    started = False
+    if term.is_port_listening():
+        # Reuse an existing bridge, but make sure it shows THIS document.
+        opened = term.open_file(abs_fig)
+        if not opened.get("ok"):
+            print("Preview not generated: %s"
+                  % opened.get("error", "could not open the generated file"))
+            return False
+    else:
+        launch = term.start_server(file_path=abs_fig, wait_ready=True)
+        if not launch.get("ok"):
+            term.stop_server()  # a process may have been spawned before the timeout
+            print("Preview not generated: %s"
+                  % launch.get("error", "could not start FigCraft"))
+            return False
+        started = True
+
+    client = FigcraftClient(port=port)
+    rendered = False
+    try:
+        if client.connect(timeout=2.0):
+            info = client.document_inspect()
+            pages = info.get("result", {}).get("pages", [])
+            children = pages[0].get("children", []) if pages else []
+            node_id = children[0].get("id") if children else None
+            if node_id:
+                res = client.export_frame(node_id, abs_png, format="png", scale=1.0)
+                rendered = bool(res.get("ok")) and os.path.exists(abs_png)
+    except Exception as exc:  # preview is best-effort, never fatal
+        print("Preview not generated: render error: %s" % exc)
+    finally:
+        client.close()
+        if started:
+            term.stop_server()
+    if rendered:
+        print("Preview exported: %s" % preview_png)
+    else:
+        print("Preview not generated: no frame was exported; open the .figcraft "
+              "file in FigCraft to inspect it.")
+    return rendered
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="FigCraft QuickDesign: token-driven UI generator with PNG previews"
@@ -648,7 +792,9 @@ def main() -> None:
     parser.add_argument("--theme", choices=["dark", "light"],
                         help="Override theme for this generation")
     parser.add_argument("-o", "--output", required=True, help="Output .figcraft path")
-    parser.add_argument("--preview", action="store_true", help="Render a PNG preview")
+    parser.add_argument("--preview", action="store_true",
+                        help="Render a PNG preview via the live bridge when available "
+                             "(otherwise report that no PNG was generated)")
     parser.add_argument("--port", type=int, default=9880,
                         help="Control port (default 9880, shared with agent_terminal)")
     args = parser.parse_args()
@@ -680,44 +826,7 @@ def main() -> None:
     print("Created .figcraft file: %s" % args.output)
 
     if args.preview:
-        out_base, _ = os.path.splitext(args.output)
-        preview_png = out_base + "_preview.png"
-        app_bin = os.environ.get("FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
-        if not os.path.exists(app_bin):
-            print("Preview skipped: FigCraft binary not found at %s "
-                  "(set FIGCRAFT_APP to override)." % app_bin)
-        else:
-            abs_fig = os.path.abspath(args.output)
-            abs_png = os.path.abspath(preview_png)
-            work_dir = os.path.dirname(abs_fig)
-            cmd = [app_bin, "--control", str(args.port),
-                   "--automation-read-root", work_dir,
-                   "--automation-write-root", work_dir, abs_fig]
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                                    stderr=subprocess.DEVNULL)
-            client = FigcraftClient(port=args.port)
-            rendered = False
-            try:
-                time.sleep(1.2)
-                if client.connect(timeout=2.0):
-                    info = client.document_inspect()
-                    pages = info.get("result", {}).get("pages", [])
-                    if pages and pages[0].get("children"):
-                        node_id = pages[0]["children"][0].get("id")
-                        if node_id:
-                            rendered = bool(client.export_frame(
-                                node_id, abs_png, format="png", scale=1.0).get("ok"))
-            except Exception as exc:  # preview is best-effort
-                print("Warning: render error: %s" % exc)
-            finally:
-                client.close()
-                proc.terminate()
-                try:
-                    proc.wait(timeout=1.0)
-                except Exception:
-                    proc.kill()
-            print("Preview exported: %s" % preview_png if rendered
-                  else "Preview unavailable; open the file in FigCraft.")
+        export_preview(args.output, port=args.port)
 
     print("Done. Ready to inspect or iterate.\n")
 
