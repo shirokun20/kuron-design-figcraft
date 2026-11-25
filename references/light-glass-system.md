@@ -193,4 +193,4 @@ forbidden.
 
 Dark and light share the same builder contract, linter, and 3–5x verification
 loop (`dark-artifact-rules.md`). Only token values, style direction, glass
-representation, and the checklist above change. Package version: `3.2.0`.
+representation, and the checklist above change. Package version: `3.2.1`.

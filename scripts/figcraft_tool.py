@@ -13,22 +13,17 @@ import os
 import json
 import zipfile
 import socket
-import subprocess
-import time
 import argparse
 import re
 import copy
-from typing import Callable, Dict, List, Optional, Any, Union, Tuple
+from typing import Callable, Dict, List, Optional, Any, Tuple
 
-# Make sibling modules (e.g. build_artistic_flow) importable from any cwd.
+# Make sibling modules importable from any cwd.
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from design_manifest import (  # noqa: E402
-    DesignManifestError,
-    contrast_ratio,
-    describe_overrides,
     load_design,
     resolve,
     to_builder_tokens,
@@ -133,6 +128,235 @@ ICON_PATHS = {
     "arrow-right": ["M5 12h14", "m12 5 7 7-7 7"],
     "arrow-left": ["M19 12H5", "m12 19-7-7 7-7"],
 }
+
+
+# ---------------------------------------------------------------------------
+# RECURSIVE AUTOLAYOUT RESOLVER (core, shared by save() and generators)
+# ---------------------------------------------------------------------------
+def resolve_tree_layout(doc_nodes, root_id):
+    """Resolve AutoLayout sizes and transforms for one bounded node subtree."""
+    root = doc_nodes[str(root_id)]
+
+    def resolve_node(nid, avail_w, avail_h):
+        node = doc_nodes[str(nid)]
+        ntype = node.get("type", "frame")
+
+        if ntype == "text":
+            chars = node.get("characters", "")
+            style = node.get("style", {})
+            fsize = style.get("font_size", 13.0)
+            ffam = style.get("font_family", "Inter")
+            tw = estimate_text_width(chars, fsize, ffam)
+            th = fsize * 1.35
+            ch_layout = node.get("child_layout", {})
+            # Engine parity: fill ONLY empty values (0). Measured sizes
+            # (from the app save or explicit input) are never overwritten —
+            # this stops the script-vs-engine tug-of-war.
+            if ch_layout.get("sizing_h") == "hug" and node.get("width", 0) <= 0:
+                node["width"] = round(tw, 1)
+            if ch_layout.get("sizing_v") == "hug" and node.get("height", 0) <= 0:
+                node["height"] = round(th, 1)
+            return node["width"], node["height"]
+
+        if ntype != "frame":
+            return node.get("width", 0.0), node.get("height", 0.0)
+
+        layout_cfg = node.get("layout")
+        children_ids = node.get("children", [])
+
+        if not layout_cfg or layout_cfg.get("mode") == "none":
+            for cid in children_ids:
+                c = doc_nodes[str(cid)]
+                resolve_node(cid, c.get("width", 100.0), c.get("height", 100.0))
+            return node.get("width", avail_w), node.get("height", avail_h)
+
+        mode = layout_cfg.get("mode", "vertical")
+        gap = float(layout_cfg.get("gap", 0.0))
+        pad = layout_cfg.get("padding", [0.0, 0.0, 0.0, 0.0])
+        pad_t, pad_r, pad_b, pad_l = float(pad[0]), float(pad[1]), float(pad[2]), float(pad[3])
+        main_align = layout_cfg.get("main_align", "min")
+        cross_align = layout_cfg.get("cross_align", "min")
+
+        parent_w = node.get("width", avail_w)
+        parent_h = node.get("height", avail_h)
+        inner_w = max(0.0, parent_w - pad_l - pad_r)
+        inner_h = max(0.0, parent_h - pad_t - pad_b)
+
+        if not children_ids:
+            return parent_w, parent_h
+
+        if mode == "vertical":
+            total_fixed_h = 0.0
+            fill_v_children = []
+
+            for cid in children_ids:
+                c = doc_nodes[str(cid)]
+                ch_sizing = c.get("child_layout", {})
+                sz_h = ch_sizing.get("sizing_h", "fixed")
+                sz_v = ch_sizing.get("sizing_v", "fixed")
+
+                cw, ch = resolve_node(cid, inner_w if sz_h == "fill" else c.get("width", inner_w), c.get("height", 32.0))
+                if sz_v == "fill":
+                    fill_v_children.append(c)
+                else:
+                    total_fixed_h += ch
+
+            total_gaps = max(0, len(children_ids) - 1) * gap
+
+            if node.get("child_layout", {}).get("sizing_v") == "hug":
+                node["height"] = round(pad_t + total_fixed_h + total_gaps + pad_b, 1)
+                inner_h = max(0.0, node["height"] - pad_t - pad_b)
+
+            rem_h = max(0.0, inner_h - total_fixed_h - total_gaps)
+            if fill_v_children:
+                h_per_fill = rem_h / len(fill_v_children)
+                for c in fill_v_children:
+                    c["height"] = max(10.0, h_per_fill)
+                    resolve_node(c["id"], c["width"], c["height"])
+
+            # Vertical main_align mirrors the horizontal branch (engine parity:
+            # the live engine centres, maximises, and spreads vertical blocks;
+            # the old reflow always top-pinned until a save moved 95 frames).
+            tot_children_h = sum(doc_nodes[str(cid)]["height"] for cid in children_ids)
+            # NOTE 2026-11-08: vertical spaceBetween is deliberately NOT
+            # mirrored. Evidence: the engine renders Panel1-02 (spaceBetween)
+            # pinned to the top (= min), while Panel1-01 in the middle is a
+            # manual user arrangement (43.6, not any layout output). Mirroring
+            # spread would break twelve cards in 02 (+37px). The mid-panel
+            # intent is preserved via per-case main_align=center.
+            if main_align == "max":
+                cur_gap = gap
+                cur_y = pad_t + max(0.0, inner_h - tot_children_h - total_gaps)
+            elif main_align == "center":
+                cur_gap = gap
+                cur_y = pad_t + max(0.0, (inner_h - tot_children_h - total_gaps) / 2.0)
+            else:
+                cur_gap = gap
+                cur_y = pad_t
+            for cid in children_ids:
+                c = doc_nodes[str(cid)]
+                if cross_align == "center":
+                    cur_x = pad_l + max(0.0, (inner_w - c["width"]) / 2.0)
+                elif cross_align == "max":
+                    cur_x = pad_l + max(0.0, inner_w - c["width"])
+                else:
+                    cur_x = pad_l
+
+                c["transform"] = [1.0, 0.0, 0.0, 1.0, round(cur_x, 1), round(cur_y, 1)]
+                cur_y += c["height"] + cur_gap
+
+        elif mode == "horizontal":
+            total_fixed_w = 0.0
+            fill_h_children = []
+
+            for cid in children_ids:
+                c = doc_nodes[str(cid)]
+                ch_sizing = c.get("child_layout", {})
+                sz_h = ch_sizing.get("sizing_h", "fixed")
+                sz_v = ch_sizing.get("sizing_v", "fixed")
+
+                cw, ch = resolve_node(cid, c.get("width", 100.0), inner_h if sz_v == "fill" else c.get("height", 32.0))
+                if sz_h == "fill":
+                    fill_h_children.append(c)
+                else:
+                    total_fixed_w += cw
+
+            total_gaps = max(0, len(children_ids) - 1) * gap
+
+            if node.get("child_layout", {}).get("sizing_h") == "hug":
+                node["width"] = round(pad_l + total_fixed_w + total_gaps + pad_r, 1)
+                inner_w = max(0.0, node["width"] - pad_l - pad_r)
+
+            rem_w = max(0.0, inner_w - total_fixed_w - total_gaps)
+            if fill_h_children:
+                w_per_fill = rem_w / len(fill_h_children)
+                for c in fill_h_children:
+                    c["width"] = max(10.0, w_per_fill)
+                    resolve_node(c["id"], c["width"], c["height"])
+
+            tot_children_w = sum(doc_nodes[str(cid)]["width"] for cid in children_ids)
+
+            if main_align == "spaceBetween" and len(children_ids) > 1:
+                cur_gap = (inner_w - tot_children_w) / (len(children_ids) - 1)
+                cur_x = pad_l
+            elif main_align == "max":
+                cur_gap = gap
+                cur_x = pad_l + max(0.0, inner_w - tot_children_w - total_gaps)
+            elif main_align == "center":
+                cur_gap = gap
+                cur_x = pad_l + max(0.0, (inner_w - tot_children_w - total_gaps) / 2.0)
+            else:
+                cur_gap = gap
+                cur_x = pad_l
+
+            # Wrap: split children into several lines when they exceed inner_w
+            # (engine parity — without this, a wrapped line collapses to 1 line,
+            # e.g. ScChecks: chip_1295 was off by 540px).
+            wrap = bool(node.get("layout", {}).get("wrap", False))
+            cross_gap = float(node.get("layout", {}).get("cross_gap", gap))
+            lines: list = []
+            if wrap:
+                cur_line: list = []
+                cur_w = 0.0
+                for cid in children_ids:
+                    cw = doc_nodes[str(cid)]["width"]
+                    add = cw if not cur_line else gap + cw
+                    if cur_line and cur_w + add > inner_w + 1e-6:
+                        lines.append(cur_line)
+                        cur_line = []
+                        cur_w = 0.0
+                        add = cw
+                    cur_line.append(cid)
+                    cur_w += add
+                if cur_line:
+                    lines.append(cur_line)
+            else:
+                lines = [list(children_ids)]
+
+            if (node.get("child_layout", {}).get("sizing_v") == "hug"
+                    and wrap and len(lines) > 1):
+                node["height"] = round(
+                    pad_t + sum(max(doc_nodes[str(cid)]["height"] for cid in ln) for ln in lines)
+                    + cross_gap * (len(lines) - 1) + pad_b, 1)
+                inner_h = max(0.0, node["height"] - pad_t - pad_b)
+
+            cur_y = pad_t
+            for line in lines:
+                line_w = sum(doc_nodes[str(cid)]["width"] for cid in line)
+                line_gaps = max(0, len(line) - 1) * gap
+                if main_align == "spaceBetween" and len(line) > 1:
+                    cur_gap = (inner_w - line_w) / (len(line) - 1)
+                    cur_x = pad_l
+                elif main_align == "max":
+                    cur_gap = gap
+                    cur_x = pad_l + max(0.0, inner_w - line_w - line_gaps)
+                elif main_align == "center":
+                    cur_gap = gap
+                    cur_x = pad_l + max(0.0, (inner_w - line_w - line_gaps) / 2.0)
+                else:
+                    cur_gap = gap
+                    cur_x = pad_l
+
+                for cid in line:
+                    c = doc_nodes[str(cid)]
+                    if cross_align == "center":
+                        # The engine draws glyphs from the top of the box (+-2px):
+                        # a centred box => centred glyph. Do not tune y manually —
+                        # save() always recomputes (see SKILL anti-illusion).
+                        y = pad_t + max(0.0, (inner_h - c["height"]) / 2.0) if not wrap else cur_y
+                    elif cross_align == "max":
+                        y = pad_t + max(0.0, inner_h - c["height"]) if not wrap else cur_y
+                    else:
+                        y = cur_y
+
+                    c["transform"] = [1.0, 0.0, 0.0, 1.0, round(cur_x, 1), round(y, 1)]
+                    cur_x += c["width"] + cur_gap
+                if wrap:
+                    cur_y += max(doc_nodes[str(cid)]["height"] for cid in line) + cross_gap
+
+        return node.get("width", avail_w), node.get("height", avail_h)
+
+    resolve_node(root_id, root["width"], root["height"])
 
 
 # ---------------------------------------------------------------------------
@@ -270,14 +494,11 @@ class FigcraftDocument:
         return inst
 
     def resolve_layout(self):
-        """Resolve two-pass AutoLayout on every page, ``pages[0..N]``."""
-        try:
-            from build_artistic_flow import resolve_tree_layout
-        except ImportError as exc:
-            raise RuntimeError(
-                "build_artistic_flow.py must be in the same scripts/ directory as "
-                "figcraft_tool.py (resolve_tree_layout)"
-            ) from exc
+        """Resolve two-pass AutoLayout on every page, ``pages[0..N]``.
+
+        Uses the core resolver in this module; ``save()`` never depends on a
+        demo generator module.
+        """
         for pid in self.doc.get("pages", [1]):
             page = self.doc["nodes"].get(str(pid))
             if page:
@@ -323,13 +544,17 @@ class FigcraftDocument:
                 pass
 
         temp_path = path + ".tmp"
-        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
-            # Compact like the engine (SKILL §7.3: schema from live save):
-            # indent=2 doubles document.json size without benefit.
-            z.writestr("document.json", json.dumps(self.doc, separators=(",", ":")))
-            z.writestr("thumbnail.png", existing_thumb or png_1x1)
-        
-        os.replace(temp_path, path)
+        try:
+            with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+                # Compact like the engine (SKILL §7.3: schema from live save):
+                # indent=2 doubles document.json size without benefit.
+                z.writestr("document.json", json.dumps(self.doc, separators=(",", ":")))
+                z.writestr("thumbnail.png", existing_thumb or png_1x1)
+            os.replace(temp_path, path)
+        finally:
+            # A failed ZipFile write or replace must not leave a stale .tmp.
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         self.file_path = path
 
     def alloc_id(self) -> int:
@@ -2417,7 +2642,10 @@ def main():
         client = FigcraftClient(port=args.port)
         if not client.connect():
             print(f"Error: FigCraft is not running on 127.0.0.1:{args.port}")
-            print("Start FigCraft with: /Applications/FigCraft.app/Contents/MacOS/FigCraft --control " + str(args.port))
+            app = os.environ.get(
+                "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
+            print("Start FigCraft with: %s --control %s (set FIGCRAFT_APP for a "
+                  "non-default location)" % (app, args.port))
             sys.exit(1)
 
         try:

@@ -79,14 +79,23 @@ Run the bundled installer with the skills directory of your harness:
 bash install.sh ~/.claude/skills/kuron-design-figcraft
 ```
 
-Typical targets are Claude Code (`~/.claude/skills/`), Codex (`~/.codex/skills/`), OpenCode (`~/.config/opencode/skills/`), Cursor (`~/.cursor/skills/`), and your Orca agent's `skills/` folder. With no argument, `install.sh` uses `~/.claude/skills/kuron-design-figcraft`. You can also copy this whole folder into the target skills directory yourself — the installer only adds version checks and a test run.
+`DEST` is the full path of the installed skill directory (for example
+`~/.claude/skills/kuron-design-figcraft`). Typical targets are Claude Code
+(`~/.claude/skills/`), Codex (`~/.codex/skills/`), OpenCode
+(`~/.config/opencode/skills/`), Cursor (`~/.cursor/skills/`), and your Orca
+agent's `skills/` folder. With no argument, `install.sh` uses
+`~/.claude/skills/kuron-design-figcraft`. Use `bash install.sh --help` for
+options and `--dry-run` to preview the target without copying files. You can
+also copy this whole folder into the target skills directory yourself — the
+installer only adds version checks, asset copying, and a test run.
 
 ### Build a design from scratch
 
 Run these commands from the package root (or the installed skill folder):
 
 ```bash
-# 1. Put a DESIGN.md in your project: copy the template, then edit the JSON block.
+# 1. Put a DESIGN.md in your project: copy the valid starter, then edit its JSON block.
+#    The starter passes json.loads() + validate() on first run.
 cp references/DESIGN.md ./DESIGN.md
 #    choose style_direction, map action-primary/data-technical, set a11y and states
 
@@ -105,7 +114,7 @@ python3 scripts/agent_terminal.py --port 9880 stop
 python3 scripts/audit_render.py out/workbench.figcraft
 ```
 
-`--port` is a global option and must come before the subcommand; `9880` is only a default. Set `FIGCRAFT_APP` for a non-default app binary, `FIGCRAFT_DESIGN` for the working file, and `FIGCRAFT_DESIGN_MANIFEST` if your `DESIGN.md` lives somewhere unusual.
+`--port` is a global option and must come before the subcommand; `9880` is only a default. Set `FIGCRAFT_APP` for a non-default app binary, `FIGCRAFT_DESIGN` for the working file, and `FIGCRAFT_DESIGN_MANIFEST` if your `DESIGN.md` lives somewhere unusual. `watch` does not modify the source `.figcraft`: it soft-reloads the live session and writes exported PNGs to the output folder. `frames --json` is a deprecated compatibility no-op — the command already prints JSON.
 
 ---
 
@@ -116,9 +125,9 @@ python3 scripts/audit_render.py out/workbench.figcraft
 | `SKILL.md` | Short entry point with the rules the AI agent follows, plus version metadata |
 | `references/` | Detailed specifications: the `DESIGN.md` template, token layers, style directions, layout rules, and live-editing workflow |
 | `scripts/` | Python toolkit: generator, builders, live terminal bridge, render auditor, and design-contract resolver |
-| `tests/` | 103 standard-library tests covering builders, contracts, layout, multi-page saves, and package hygiene |
+| `tests/` | Standard-library tests covering builders, contracts, layout, multi-page saves, fail-closed discovery, and package hygiene |
 
-Other files at the root: `DESIGN.md` (this package's own preset), `install.sh`, `CHANGELOG.md`, `VERSION`, `LICENSE`, and the showcase PNGs under `docs/assets/showcase/`.
+Other files at the root: `DESIGN.md` (this package's own preset), `install.sh`, `CHANGELOG.md`, `CONTRIBUTING.md` (maintainer workflow), `VERSION`, `LICENSE`, and the showcase PNGs under `docs/assets/showcase/`.
 
 ---
 
@@ -128,7 +137,28 @@ Other files at the root: `DESIGN.md` (this package's own preset), `install.sh`, 
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-103 tests, all using the Python standard library — no third-party dependencies, no network, and no credentials. `install.sh` runs the same command to confirm a clean installation.
+All tests use the Python standard library — no third-party dependencies, no network, and no credentials. `install.sh` runs the same command from the installed directory (with `python3 -B`) to confirm a clean, cache-free installation.
+
+---
+
+## Troubleshooting
+
+- **`No DESIGN.md found` / fail-closed error.** Scripts never fall back to the
+  skill's bundled manifest. Copy the valid starter into your project root with
+  `cp references/DESIGN.md ./DESIGN.md`, or set `FIGCRAFT_DESIGN_MANIFEST` to an
+  explicit path. The error lists every directory it searched.
+- **FigCraft binary not found on Linux.** The default binary path is macOS-only.
+  Set `FIGCRAFT_APP=/path/to/figcraft-executable` before `start`; builders,
+  linting, validation, and the audit work offline without it.
+- **Port busy or stale session.** Run `status` first; if the socket is dead,
+  `stop` and `start` again or pass a different `--port`. PID/port files live in
+  the current working directory.
+- **Watch appears to do nothing to the file.** By design: `watch` never edits
+  the `.figcraft` source; it soft-reloads the live session and writes PNGs to
+  the output folder. Check that folder, and keep `--max-events` /
+  `--max-seconds` bounded.
+- **Broken preview or export.** Pass `--page-index` / `--page-name` to inspect a
+  page other than `pages[0]`; the source document is never rewritten.
 
 ---
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.0.0)
+FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.2.1)
 Cross-Agent / Harness-Compatible Bridge (Claude Code, Codex, Cursor, generic harnesses)
 
 Provides a dedicated process manager, live JSON-RPC socket bridge, and CLI terminal
@@ -37,7 +37,7 @@ ACTIVE_FILE = os.path.join(os.getcwd(), ".figcraft.active.json")
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 DEFAULT_DESIGN_REL = os.environ.get("FIGCRAFT_DESIGN", "design/workbench.figcraft")
-HARNESS_VERSION = "3.2.0"
+HARNESS_VERSION = "3.2.1"
 HARNESS_NAME = "kuron-design-figcraft"
 
 # Cut-loop guards: no read/poll loop may run unbounded.
@@ -45,6 +45,9 @@ MAX_SOCKET_CHUNKS = 1024          # max recv() calls per JSON-RPC response
 MAX_WATCH_EVENTS = 1000           # max file-change events per watch session
 MAX_WATCH_SECONDS = 3600.0        # max wall-clock seconds per watch session
 MAX_REPL_LINES = 10000            # max input lines per interactive session
+MAX_SEARCH_DEPTH = 64             # max parent directories walked for repo root
+MAX_PROCESS_WAIT = 20             # max terminate() polls before SIGKILL
+MAX_READY_POLLS = 40              # max 10s/0.3s startup polls
 
 FRAME_TYPES = {"frame", "page", "screen", "artboard", "canvas"}
 
@@ -62,30 +65,36 @@ def find_repo_root(marker: str = DEFAULT_DESIGN_REL) -> Optional[str]:
     Returns the repo-root directory path, or None if not found before `/`.
     """
     cur = os.path.abspath(os.getcwd())
-    while True:
+    for _ in range(MAX_SEARCH_DEPTH):  # cut-loop guard
         if os.path.exists(os.path.join(cur, marker)):
             return cur
         parent = os.path.dirname(cur)
         if parent == cur:
-            return None
+            break
         cur = parent
+    return None
 
 
 def resolve_design_path(path: Optional[str] = None) -> str:
-    """Resolve a design file path relative to the repo root when possible.
+    """Resolve a design path, preferring the user's current directory.
 
-    Absolute paths pass through unchanged. Relative paths are resolved against
-    the repo root (found by walking up from cwd until DEFAULT_DESIGN_REL
-    exists); if no repo root is found, fall back to cwd-relative abspath.
-    PID/PORT files intentionally keep using cwd and are NOT affected.
+    Absolute paths pass through unchanged. A relative path that exists under
+    cwd wins; only when it does not exist do we try the repo root discovered by
+    walking up from cwd. The cwd-relative abspath is the final fallback.
+    PID/PORT/active-file metadata intentionally keeps using cwd.
     """
     p = path or DEFAULT_DESIGN_REL
     if os.path.isabs(p):
         return p
+    cwd_abs = os.path.abspath(p)
+    if os.path.exists(cwd_abs):
+        return cwd_abs
     root = find_repo_root()
     if root is not None:
-        return os.path.join(root, p)
-    return os.path.abspath(p)
+        root_abs = os.path.abspath(os.path.join(root, p))
+        if os.path.exists(root_abs):
+            return root_abs
+    return cwd_abs
 
 
 def read_active_file() -> Optional[str]:
@@ -294,7 +303,8 @@ def project_page(path: str, page_index: Optional[int] = None,
     """
     src = os.path.abspath(path)
     with zipfile.ZipFile(src, "r") as archive:
-        document = json.load(archive.open("document.json"))
+        with archive.open("document.json") as handle:
+            document = json.load(handle)
         members = [(info, archive.read(info.filename)) for info in archive.infolist()]
     page_id = resolve_document_page_id(document, page_index, page_name)
     document["pages"] = [page_id]
@@ -378,6 +388,27 @@ class FigcraftTerminal:
         self.port = port
         self.host = host
         self.timeout = timeout
+        self.proc = None  # handle of the child we started, reaped on stop/failure
+
+    @staticmethod
+    def _terminate_proc(proc) -> None:
+        """Terminate and reap our own child process without leaving zombies."""
+        if proc is None:
+            return
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                for _ in range(MAX_PROCESS_WAIT):  # cut-loop guard
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.1)
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+            else:
+                proc.wait(timeout=1)
+        except (OSError, ValueError, TypeError):
+            pass
 
     def is_port_listening(self) -> bool:
         """Check if FigCraft control port is actively listening."""
@@ -466,12 +497,13 @@ class FigcraftTerminal:
             abs_file = resolve_design_path(file_path)
             cmd.append(abs_file)
 
-        proc = subprocess.Popen(
+        self.proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True
         )
+        proc = self.proc
 
         with open(PID_FILE, "w") as f:
             f.write(str(proc.pid))
@@ -483,13 +515,21 @@ class FigcraftTerminal:
         if wait_ready:
             start_time = time.time()
             ready = False
-            while time.time() - start_time < 10.0:
+            for _ in range(MAX_READY_POLLS):  # cut-loop guard
+                if time.time() - start_time >= 10.0:
+                    break
                 if self.is_port_listening():
                     ready = True
                     break
                 time.sleep(0.3)
 
             if not ready:
+                self._terminate_proc(self.proc)
+                self.proc = None
+                for fpath in (PID_FILE, PORT_FILE):
+                    if os.path.exists(fpath):
+                        os.remove(fpath)
+                clear_active_file()
                 return {
                     "ok": False,
                     "error": f"FigCraft launched (PID {proc.pid}) but port {self.port} did not respond within 10s."
@@ -524,6 +564,10 @@ class FigcraftTerminal:
                 stopped = True
             except Exception as e:
                 return {"ok": False, "error": f"Failed to kill PID {pid}: {e}"}
+        # Always reap the child started by this terminal, even if the PID file
+        # was stale or absent, so no zombie/orphan is left behind.
+        self._terminate_proc(self.proc)
+        self.proc = None
 
         for fpath in [PID_FILE, PORT_FILE]:
             if os.path.exists(fpath):
@@ -624,7 +668,8 @@ class FigcraftTerminal:
         if not source or not os.path.exists(source):
             raise RuntimeError("No active .figcraft file is known; run start/open first.")
         with zipfile.ZipFile(source, "r") as archive:
-            document = json.load(archive.open("document.json"))
+            with archive.open("document.json") as handle:
+                document = json.load(handle)
         target = resolve_document_page_id(document, page_index, page_name)
         first = resolve_document_page_id(document)
         inspect = self.send_rpc("document.inspect", {"depth": 1})
@@ -732,7 +777,8 @@ class FigcraftTerminal:
             source = effective_design_path()
             if source and os.path.exists(source):
                 with zipfile.ZipFile(source, "r") as archive:
-                    document = json.load(archive.open("document.json"))
+                    with archive.open("document.json") as handle:
+                        document = json.load(handle)
                 ids = [int(pid) for pid in (document.get("pages") or [])]
                 target = resolve_document_page_id(document, page_name=page_name)
                 result["page_index"] = ids.index(target)
@@ -918,7 +964,7 @@ REPL_HELP = (
 REPL_CMD_HELP: Dict[str, str] = {
     "status": "status — check socket health and active document. No arguments.",
     "inspect": "inspect — print raw document.inspect output. No arguments.",
-    "frames": "frames [--page-index N | --page-name NAME] — list frames on a page of pages[0..N]: id, name, x/y/w/h.",
+    "frames": "frames [--page-index N | --page-name NAME] — list frames on a page of pages[0..N]: id, name, x/y/w/h. --json is a deprecated compatibility no-op (output is unchanged).",
     "open": "open <path> — open a .figcraft file in running FigCraft and make it the active file.",
     "reload": "reload [--soft|--hard] [file] — default --soft tries refresh without force-closing the tab, falls back to close+open with \"fallback\": true. Without a path it uses the file made active by start/open, and fails if no file is known or the reload fails. --hard always closes+opens.",
     "export": "export <id> <path> [--page-index N | --page-name NAME] — export one node; a non-zero page uses a read-only projection.",
@@ -983,7 +1029,7 @@ def build_parser() -> argparse.ArgumentParser:
     # frames
     p_frames = sub.add_parser("frames", help="List screen-level frames via document.inspect (id, name, x/y/w/h)")
     p_frames.add_argument("--json", action="store_true",
-                          help="Output JSON (default output is already JSON; kept for compatibility)")
+                          help="Deprecated compatibility no-op; the CLI already prints JSON")
     p_frames.add_argument("--page-index", type=int,
                           help="List frames on this page index (default: 0)")
     p_frames.add_argument("--page-name", help="List frames on this page name")

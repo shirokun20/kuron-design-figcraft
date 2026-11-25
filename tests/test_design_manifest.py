@@ -45,6 +45,36 @@ class DesignManifestTests(unittest.TestCase):
         self.assertIn(dm.ENV_OVERRIDE, message)
         self.assertIn("references/DESIGN.md", message)
 
+    def test_reference_starter_validates_on_first_run(self):
+        path = os.path.join(ROOT, "references", "DESIGN.md")
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        document = json.loads(dm._extract_block(text, path))
+        dm.validate(document)
+        self.assertTrue(document["tokens"]["semantic"]["color"])
+
+    def test_find_design_fails_closed_from_external_directory(self):
+        """A project-less cwd must never silently use the package DESIGN.md."""
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(self._tmp.name)
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(dm.DesignManifestError) as ctx:
+                dm.load_design()
+        message = str(ctx.exception)
+        self.assertIn("No DESIGN.md found", message)
+        self.assertIn("cp <skill>/references/DESIGN.md ./DESIGN.md", message)
+        self.assertIn(dm.ENV_OVERRIDE, message)
+        self.assertNotIn(ROOT, message)  # package root was not offered as fallback
+
+    def test_package_fallback_is_explicit_opt_in_only(self):
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(self._tmp.name)
+        with patch.dict(os.environ, {dm.ENV_ALLOW_PACKAGE: "1"}, clear=True):
+            found = dm.find_design()
+        self.assertEqual(found, os.path.join(ROOT, "DESIGN.md"))
+
     def test_missing_sentinels_raise_actionable_error(self):
         path = os.path.join(self._tmp.name, "DESIGN.md")
         with open(path, "w", encoding="utf-8") as handle:

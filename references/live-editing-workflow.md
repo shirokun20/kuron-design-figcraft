@@ -22,12 +22,15 @@ Run all commands from the package root.
 
 - The port is freely changeable (`--port 9901`, etc.) when the default is busy.
   It is not a constant — always read it from the flag or `.figcraft.port`.
-- `.figcraft` paths are **cwd-tolerant**: relative paths resolve against the
-  working directory/root containing the file. The default can be overridden via
-  env `FIGCRAFT_DESIGN`.
+- `.figcraft` paths are **cwd-tolerant**: a relative path is resolved against
+  the current working directory first, then against the discovered project root
+  only if no file exists in cwd. The default can be overridden via env
+  `FIGCRAFT_DESIGN`.
 - PID/port files (`.figcraft.pid`, `.figcraft.port`) are written in the current
   working directory.
-- The FigCraft binary location can be overridden via env `FIGCRAFT_APP`.
+- The FigCraft binary location can be overridden via env `FIGCRAFT_APP`. On
+  Linux, point it at the installed FigCraft executable (the macOS default path
+  under `/Applications` does not exist); offline operations need no binary.
 
 ---
 
@@ -63,9 +66,9 @@ Run all commands from the package root.
 | `start` | Launch FigCraft with a live port (`--file/-f`, `--no-wait`) | `--port 9880 start --file out/workbench.figcraft` |
 | `status` | Check socket health and active document | `--port 9880 status` |
 | `open` | Open another file in the running instance | `--port 9880 open out/other.figcraft` |
-| `frames` | List screen-level frames (`id`, `name`, `x/y/w/h`); `--json` | `--port 9880 frames` |
+| `frames` | List screen-level frames (`id`, `name`, `x/y/w/h`); `--json` is a deprecated compatibility no-op (output is already JSON) | `--port 9880 frames` |
 | `reload` | `--soft` (default, safe) or `--hard` (forced); uses the active file when no path is given | `--port 9880 reload --soft` |
-| `watch` | Watch mtime → auto reload + export-all; uses the active file when no path is given | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
+| `watch` | Watch mtime → soft reload in the live session + export-all PNGs; never modifies the source `.figcraft`; uses the active file when no path is given | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
 | `exec` | Direct JSON-RPC engine command | `--port 9880 exec select.set '{"ids": [10]}'` |
 | `diff` | Summarise one node's properties | `--port 9880 diff --id <ID>` |
 | `export` | Export ONE frame (`--id`, `-o`, `--format`, `--scale`, `--page-index` / `--page-name`) | `--port 9880 export --id <ID> -o out/previews/01.png --page-index 1` |
@@ -82,7 +85,7 @@ Example manifest:
 
 ```bash
 python3 scripts/agent_terminal.py --port 9880 harness-info
-# => {"name": "kuron-design-figcraft", "version": "3.2.0", ...}
+# => {"name": "kuron-design-figcraft", "version": "3.2.1", ...}
 ```
 
 ---
@@ -150,7 +153,12 @@ Use single quotes around JSON in the shell so it is not reinterpreted.
   - `watch`: `--max-events` (default 1000) and `--max-seconds` (default 3600).
   - `interactive`: at most 10,000 lines.
 - **Binary missing:** `start` reports a clear error. Set `FIGCRAFT_APP` to the
-  binary location; offline operations (builder/lint/save) still work.
+  binary location (required on Linux, where the macOS default path is absent);
+  offline operations (builder/lint/save) still work.
+- **Missing `DESIGN.md`:** scripts fail closed with an actionable message. Copy
+  the starter (`cp <skill>/references/DESIGN.md ./DESIGN.md`) into your project
+  root or set `FIGCRAFT_DESIGN_MANIFEST` to an explicit path. There is no silent
+  fallback to the skill's bundled manifest.
 - **Stale session:** after headless edits outside the session, `reload --hard`
   or open another file then reopen the target before any visual claim.
 - **`DESIGN.md` changed:** treat it as a visual change — reload tokens,

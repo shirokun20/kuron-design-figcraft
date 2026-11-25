@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Multi-Agent Concurrency Orchestrator
+FigCraft Multi-Agent Concurrency Orchestrator (kuron-design-figcraft 3.2.1)
 Demonstrates and manages concurrent multi-agent design workflows on a single .figcraft file.
 Compatible with Antigravity, Claude Code, Muse Code, and OMP.
 
@@ -17,12 +17,15 @@ import os
 import json
 import socket
 import zipfile
+import argparse
 import threading
 import time
 from typing import Dict, Any, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from figcraft_tool import FigcraftDocument, FigcraftClient, TOKENS, hex_to_rgba
+
+MAX_LOCK_RETRIES = 100  # cut-loop guard for lock acquisition
+
 
 class MultiAgentSocketWorker:
     """
@@ -46,6 +49,12 @@ class MultiAgentSocketWorker:
             return True
         except Exception as e:
             print(f"[{self.agent_id}] Failed to connect: {e}")
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                except OSError:
+                    pass
+                self.sock = None
             return False
 
     def rpc(self, command: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -78,8 +87,11 @@ class MultiAgentSocketWorker:
         return res
 
     def close(self):
-        if self.sock:
-            self.sock.close()
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            finally:
+                self.sock = None
 
 
 class ASTPartitionMerger:
@@ -95,12 +107,16 @@ class ASTPartitionMerger:
 
     def acquire_lock(self, timeout: float = 5.0) -> bool:
         start = time.time()
-        while time.time() - start < timeout:
+        for _ in range(MAX_LOCK_RETRIES):  # cut-loop guard
+            if time.time() - start >= timeout:
+                break
             try:
                 # O_EXCL ensures atomic lock creation
                 fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode())
-                os.close(fd)
+                try:
+                    os.write(fd, str(os.getpid()).encode())
+                finally:
+                    os.close(fd)
                 return True
             except FileExistsError:
                 time.sleep(0.05)
@@ -152,16 +168,19 @@ class ASTPartitionMerger:
             self.release_lock()
 
 
-def simulate_concurrent_agents():
+def simulate_concurrent_agents(out: Optional[str] = None):
+    """Demonstrate two agents merging conflict-free into one .figcraft file.
+
+    The builders are imported lazily so ``--help`` works from any directory
+    without requiring the project's DESIGN.md.
     """
-    Demonstration: 2 subagents concurrently generating Screen A and Screen B in parallel threads,
-    then merging conflict-free into design/collab-demo.figcraft.
-    """
+    from figcraft_tool import FigcraftDocument, TOKENS, hex_to_rgba  # noqa: E402
+
     print("=== Simulating 2 Concurrent Subagents on FigCraft Document ===")
 
-    # Setup base doc (output path is generic and overridable via env var)
+    # Setup base doc (output path is generic and overridable via CLI or env var)
     base_doc = FigcraftDocument("Collab Demo")
-    demo_path = os.environ.get("FIGCRAFT_DEMO", "design/collab-demo.figcraft")
+    demo_path = out or os.environ.get("FIGCRAFT_DEMO", "design/collab-demo.figcraft")
     parent = os.path.dirname(os.path.abspath(demo_path))
     if parent:
         os.makedirs(parent, exist_ok=True)
@@ -238,8 +257,8 @@ def simulate_concurrent_agents():
     t2 = threading.Thread(target=agent2_task)
     t1.start()
     t2.start()
-    t1.join()
-    t2.join()
+    t1.join(timeout=10.0)  # cut-loop guard: never wait forever on a worker
+    t2.join(timeout=10.0)
 
     # Merge AST trees conflict-free
     merger = ASTPartitionMerger(demo_path)
@@ -247,5 +266,16 @@ def simulate_concurrent_agents():
 
     print("✓ Collab test file generated and merged at:", demo_path)
 
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Demonstrate partitioned-ID multi-agent merging in FigCraft.")
+    parser.add_argument(
+        "--out", default=None,
+        help="Output .figcraft path (default: FIGCRAFT_DEMO or design/collab-demo.figcraft).")
+    args = parser.parse_args()
+    simulate_concurrent_agents(args.out)
+
+
 if __name__ == "__main__":
-    simulate_concurrent_agents()
+    main()

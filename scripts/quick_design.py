@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FigCraft QuickDesign — token-driven rapid UI generator (3.2.0).
+"""FigCraft QuickDesign — token-driven rapid UI generator (3.2.1).
 
 Every colour, font size, spacing step, component size, and microcopy string is
 resolved from the project's ``DESIGN.md`` through ``design_manifest.py``. The

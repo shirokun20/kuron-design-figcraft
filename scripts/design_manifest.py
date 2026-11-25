@@ -4,7 +4,10 @@
 This module is the single bridge between a project's ``DESIGN.md``
 (``design-contract/v1``) and the FigCraft builders. It uses only the Python
 standard library. A missing or invalid manifest is always an actionable error:
-there is deliberately no silent fallback to an in-code preset.
+there is deliberately no silent fallback to an in-code preset or to the skill
+package's own DESIGN.md. The latter is available only through an explicit
+internal opt-in (``FIGCRAFT_ALLOW_PACKAGE_DESIGN=1``) for the bundled demo,
+never for normal calls from a consuming project.
 """
 
 import copy
@@ -18,6 +21,7 @@ END_MARKER = "<!-- design-contract:v1:end -->"
 SCHEMA_PREFIX = "kuron-design-figcraft/design-contract/"
 SCHEMA_V1 = SCHEMA_PREFIX + "v1"
 ENV_OVERRIDE = "FIGCRAFT_DESIGN_MANIFEST"
+ENV_ALLOW_PACKAGE = "FIGCRAFT_ALLOW_PACKAGE_DESIGN"
 MANIFEST_NAME = "DESIGN.md"
 
 # Hard limits: no resolver or search loop is allowed to run without a bound.
@@ -100,11 +104,16 @@ def _package_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _search_dirs(start: Optional[str] = None):
-    """Yield cwd upward to the repo/package boundary, then the package root."""
+def _search_dirs(start: Optional[str] = None, include_package: bool = False):
+    """Yield cwd upward to the project boundary.
+
+    The skill package root is appended only when *include_package* is set by an
+    explicit internal opt-in (demo / self-test). Normal project calls never see
+    it, so running a script outside a project with no DESIGN.md fails closed.
+    """
     current = os.path.abspath(start or os.getcwd())
     visited = set()
-    for _ in range(MAX_SEARCH_DEPTH):
+    for _ in range(MAX_SEARCH_DEPTH):  # cut-loop guard
         if current in visited:
             break
         visited.add(current)
@@ -120,16 +129,23 @@ def _search_dirs(start: Optional[str] = None):
         if parent == current:
             break
         current = parent
-    # The skill package ships its own explicit DESIGN.md. This is a real file,
-    # not an in-code preset, so using it for the package's own tooling is
-    # consistent with the "no silent fallback" rule.
-    root = _package_root()
-    if root not in visited:
-        yield root
+    if include_package:
+        root = _package_root()
+        if root not in visited:
+            yield root
 
 
-def find_design(path: Optional[str] = None) -> str:
-    """Locate DESIGN.md and return its absolute path, or fail with guidance."""
+def find_design(path: Optional[str] = None,
+                allow_package_fallback: bool = False) -> str:
+    """Locate DESIGN.md and return its absolute path, or fail closed.
+
+    An explicit ``path`` or ``FIGCRAFT_DESIGN_MANIFEST`` always wins. Otherwise
+    the current directory and its parents are searched up to the project
+    boundary. The bundled package manifest is used *only* when the caller
+    explicitly opts in (``allow_package_fallback=True`` or
+    ``FIGCRAFT_ALLOW_PACKAGE_DESIGN=1``), which is reserved for the skill's own
+    demo and internal self-tests — never for normal project invocations.
+    """
     override = path or os.environ.get(ENV_OVERRIDE)
     if override:
         candidate = os.path.abspath(os.path.expanduser(override))
@@ -138,28 +154,31 @@ def find_design(path: Optional[str] = None) -> str:
         if not os.path.isfile(candidate):
             raise DesignManifestError(
                 "DESIGN.md not found at the configured path: %s. "
-                "Set %s to a valid file, or copy references/%s from the skill "
-                "package into your project root." % (candidate, ENV_OVERRIDE, MANIFEST_NAME)
+                "Set %s to a valid file, or run: cp <skill>/references/%s ./%s"
+                % (candidate, ENV_OVERRIDE, MANIFEST_NAME, MANIFEST_NAME)
             )
         return candidate
 
+    allow = bool(allow_package_fallback) or str(
+        os.environ.get(ENV_ALLOW_PACKAGE, "")).strip().lower() in ("1", "true", "yes")
     searched = []
-    for directory in _search_dirs():
+    for directory in _search_dirs(include_package=allow):
         candidate = os.path.join(directory, MANIFEST_NAME)
         searched.append(candidate)
         if os.path.isfile(candidate):
             return candidate
     raise DesignManifestError(
-        "No %s found. Searched (in order): %s. Copy references/%s from the "
-        "skill package to your project root and fill in the design-contract/v1 "
-        "block, or set %s to an explicit path. Silent preset fallback is "
-        "forbidden." % (MANIFEST_NAME, ", ".join(searched), MANIFEST_NAME, ENV_OVERRIDE)
+        "No %s found. Searched (in order): %s. Create one in your project root "
+        "with: cp <skill>/references/%s ./%s (then fill in the design-contract/v1 "
+        "block), or set %s to an explicit path. Silent package fallback is "
+        "forbidden." % (MANIFEST_NAME, ", ".join(searched), MANIFEST_NAME,
+                        MANIFEST_NAME, ENV_OVERRIDE)
     )
 
 
 def _extract_block(text: str, path: str) -> str:
     start = text.find(START_MARKER)
-    end = text.find(END_MARKER)
+    end = text.find(END_MARKER, start + len(START_MARKER)) if start >= 0 else -1
     if start < 0 or end < 0 or end <= start:
         raise DesignManifestError(
             "%s is missing the design-contract/v1 sentinels. Wrap the JSON "
@@ -419,9 +438,14 @@ def validate(doc: Any) -> Dict[str, Any]:
     return doc
 
 
-def load_design(path: Optional[str] = None) -> Dict[str, Any]:
-    """Find, parse, validate, and cache the project design manifest."""
-    manifest_path = find_design(path)
+def load_design(path: Optional[str] = None,
+                allow_package_fallback: bool = False) -> Dict[str, Any]:
+    """Find, parse, validate, and cache the project design manifest.
+
+    ``allow_package_fallback`` is an internal opt-in for the bundled demo and
+    self-tests; normal callers must supply their own project DESIGN.md.
+    """
+    manifest_path = find_design(path, allow_package_fallback=allow_package_fallback)
     try:
         stat = os.stat(manifest_path)
     except OSError as exc:

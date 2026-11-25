@@ -4,7 +4,7 @@ description: Token-driven UI design in FigCraft (.figcraft) with a MANDATORY pro
 metadata:
   author: Kuron Studio Team
   license: MIT
-  version: "3.2.0"
+  version: "3.2.1"
 ---
 
 # kuron-design-figcraft — DESIGN.md-Driven Design + FigCraft Visual Verification
@@ -21,11 +21,9 @@ Rules without scripts are never executed; scripts without rules produce *slop*.
 Any change on one side must update the other, and the same version must be
 locked in `VERSION`, this frontmatter, and `HARNESS_VERSION`.
 
-> **Mandatory motto:** *"Not fancy/clever code, but targeted, accurate code that
-> directly solves the requirement and the root cause."*
-> If a trial still falls short, **keep improving together with the execution
-> side (`Kuron Developer`) until it is correct and targeted** — do not stop at
-> "good enough". A green test run is not a substitute for a correct result.
+> **Mandatory motto:** targeted, accurate code that directly solves the
+> requirement and its root cause. Maintainer workflow notes are in
+> `CONTRIBUTING.md`.
 
 Compatible with Claude Code, Codex, Cursor, Antigravity, and generic harnesses.
 It depends on no absolute path, specific repository, credential, or fixed
@@ -343,12 +341,14 @@ Guardrails:
   With no path it uses the file made active by `start`/`open`; a failed reload
   exits non-zero and `watch` never exports a stale document.
 - `watch` is always bounded by `--max-events` / `--max-seconds` (cut-loop guard).
+  It never modifies the source `.figcraft` file: it triggers a soft reload in
+  the live session and writes exported PNGs to the output folder.
 - Never run two writers on one file; `watch` is read-only.
 - Never make claims from JSON metadata — evidence = PNG.
 - A changed `DESIGN.md` is a visual change: reload tokens, reload, verify 3-5x.
 
 For parallel work, `multi_agent_worker.py` partitions ID namespaces
-(A `1000–1999`, B `2000–2999`, C `3000–3999`) plus a `.figcraft.lock`.
+(A `1000–1999`, B `2000–2999`) plus a `.figcraft.lock`.
 
 ---
 
@@ -460,7 +460,7 @@ cut-loop guard, so an agent can never hang.
 | `scripts/audit_render.py` | utilisation/overflow/clip/contrast/topology audit |
 | `scripts/multi_agent_worker.py` | partitioned IDs + lock for parallel work |
 
-**Script obligations toward `DESIGN.md` (implemented in 3.2.0):**
+**Script obligations toward `DESIGN.md` (implemented across 3.2.x):**
 
 1. Find and parse the `design-contract/v1` JSON block before build/lint/export.
 2. Resolve `$...` references, choose the theme, map roles → builders; validate
@@ -477,29 +477,12 @@ cut-loop guard, so an agent can never hang.
 semantic roles (`action-primary`, `data-technical`, …); legacy `TOKENS["colors"]`
 aliases remain as compatibility keys but carry manifest-resolved values.
 
-### 12.1 Real joint trial (mandatory, Stage 3)
-
-After `Kuron Developer` finished refactoring `scripts/`, `Kuron Designer` **must**
-run a real trial, not only unit tests:
-
-1. **Real Live Generate:** create Components, Screen, Form, modal/drawer, and
-   list/table in a live session from a test `DESIGN.md` (vary theme and style
-   direction).
-2. **Real Live Edit:** change nodes/properties/**tokens** while the session
-   runs; check `diff --id`, `reload`, and file sync.
-3. **Real pixel audit:** `export-all` → open the PNG → run `audit_render.py` →
-   evaluate the six defects in §8.1 → fix → repeat to at least 3 clean passes
-   (maximum 5).
-4. **Contract passes only if** no text escapes borders, no overlap/clipping,
-   `clip: true`, consistent sizing, duplicates keep their styling, and JSON
-   matches the PNG.
-5. **Failure = keep improving with Developer**, never report "good enough".
-   Record findings as new contracts in `references/` when a rule is missing.
+Maintainer-only process notes (including the mandatory real joint trial) live in `CONTRIBUTING.md`.
 
 The FigCraft binary location can be overridden with `FIGCRAFT_APP` (platform
 default on macOS), the working file with `FIGCRAFT_DESIGN`, and the design
 manifest with `FIGCRAFT_DESIGN_MANIFEST`.
 
 Single version: `VERSION` = frontmatter `metadata.version` =
-`HARNESS_VERSION` = `harness-info` manifest = **`3.2.0`**.
+`HARNESS_VERSION` = `harness-info` manifest = **`3.2.1`**.
 `install.sh` refuses installation when versions are out of sync.

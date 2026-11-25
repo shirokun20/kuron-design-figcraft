@@ -1,6 +1,6 @@
 # DESIGN.md — Project Design Constitution (MANDATORY, single source of truth)
 
-> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.0
+> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.1
 >
 > **This file is a TEMPLATE + SPECIFICATION.** Every consuming project **MUST**
 > own a `DESIGN.md` at its project root. Copy this file, fill in the contract
@@ -46,9 +46,10 @@
   via the `FIGCRAFT_DESIGN_MANIFEST` environment variable.
 - If none is found: **fail** with a message naming the searched locations and
   how to create the file from this template. There is no silent fallback.
-- The parser reads **only** the text between
-  `<!-- design-contract:v1:start -->` and `<!-- design-contract:v1:end -->`,
-  then calls `json.loads` (standard library, no extra dependencies).
+- The parser reads **only** the text between the `design-contract/v1` start and
+  end HTML comments (shown literally in §2), then calls `json.loads` (standard
+  library, no extra dependencies). Do not repeat those literal comments in the
+  prose above the block.
 - Validation is mandatory before scripts consume values: a known `$schema`,
   required keys present, correct types, all `$...` references resolved without
   cycles, complete `dark`/`light` pairs, and contrast meeting `a11y.minContrast`.
@@ -57,8 +58,187 @@
 
 ## 2. Contract block (copy into your project's `DESIGN.md`)
 
-<!-- design-contract:v1:start -->`
-  and `<!-- design-contract:v1:end -->
+This block is a **valid starter**: copying this file to `./DESIGN.md` passes
+`json.loads()` and `validate()` on first run. Replace the values with your
+project's decisions, but keep the sentinels and the required keys.
+
+<!-- design-contract:v1:start -->
+```json
+{
+  "$schema": "kuron-design-figcraft/design-contract/v1",
+  "name": "FigCraft Reference Preset",
+  "version": "1.0.0",
+  "style_direction": "dense_operational",
+  "default_theme": "dark",
+  "locale": "en-US",
+  "copy_tone": "direct, action + object",
+  "tokens": {
+    "primitive": {
+      "color": {
+        "n0": {"dark": "#0d0d10", "light": "#f7f6f4"},
+        "n1": {"dark": "#141418", "light": "#ffffff"},
+        "n2": {"dark": "#1a1a20", "light": "#f1f0ed"},
+        "n3": {"dark": "#22222a", "light": "#e8e7e3"},
+        "n4": {"dark": "#2a2a33", "light": "#deddd8"},
+        "n5": {"dark": "#34343f", "light": "#d8d7d1"},
+        "l0": {"dark": "#26262e", "light": "#dfdfd9"},
+        "l1": {"dark": "#35353f", "light": "#c4c3bc"},
+        "ring": {"dark": "#9a9aa8", "light": "#55555f"},
+        "i0": {"dark": "#ececf1", "light": "#16161a"},
+        "i1": {"dark": "#a5a6b0", "light": "#55555f"},
+        "i2": {"dark": "#71727d", "light": "#7c7c86"},
+        "brand": {"dark": "#ff6b5a", "light": "#c4342a"},
+        "brandHover": {"dark": "#ff8272", "light": "#a62a21"},
+        "brandFg": {"dark": "#1a0a08", "light": "#ffffff"},
+        "brandSoft": {"dark": "#2e1614", "light": "#fbe9e7"},
+        "tech": {"dark": "#35e7f5", "light": "#0b6e78"},
+        "techSoft": {"dark": "#0e2a2e", "light": "#e0f2f4"},
+        "ok": {"dark": "#5fd99a", "light": "#1f7a4d"},
+        "okSoft": {"dark": "#10281d", "light": "#e4f3ea"},
+        "warn": {"dark": "#ffc15e", "light": "#8a5a00"},
+        "warnSoft": {"dark": "#2b2110", "light": "#fbf0dc"},
+        "danger": {"dark": "#ff5c5c", "light": "#b3261e"},
+        "dangerSoft": {"dark": "#2e1416", "light": "#fde8e6"},
+        "info": {"dark": "#6ba6ff", "light": "#1f5fbf"},
+        "infoSoft": {"dark": "#111e33", "light": "#e5eefb"}
+      },
+      "space": {
+        "1": 4,
+        "2": 8,
+        "3": 12,
+        "4": 16,
+        "5": 20,
+        "6": 24
+      },
+      "radius": {
+        "xs": 6,
+        "md": 12,
+        "lg": 16,
+        "pill": 9999
+      },
+      "type": {
+        "display": 20,
+        "heading": 15,
+        "body": 13,
+        "control": 12,
+        "caption": 11,
+        "mono": 10
+      },
+      "motion": {
+        "instant": 100,
+        "fast": 200,
+        "normal": 320,
+        "slow": 480
+      }
+    },
+    "semantic": {
+      "color": {
+        "bg": "$primitive.color.n0",
+        "surface": "$primitive.color.n1",
+        "surface-2": "$primitive.color.n2",
+        "raised": "$primitive.color.n3",
+        "hover": "$primitive.color.n4",
+        "selected": "$primitive.color.n5",
+        "line": "$primitive.color.l0",
+        "line-strong": "$primitive.color.l1",
+        "ring": "$primitive.color.ring",
+        "text": "$primitive.color.i0",
+        "text-2": "$primitive.color.i1",
+        "text-3": "$primitive.color.i2",
+        "action-primary": "$primitive.color.brand",
+        "action-primary-hover": "$primitive.color.brandHover",
+        "action-primary-fg": "$primitive.color.brandFg",
+        "action-primary-soft": "$primitive.color.brandSoft",
+        "data-technical": "$primitive.color.tech",
+        "data-technical-soft": "$primitive.color.techSoft",
+        "status-success": "$primitive.color.ok",
+        "status-success-soft": "$primitive.color.okSoft",
+        "status-warn": "$primitive.color.warn",
+        "status-warn-soft": "$primitive.color.warnSoft",
+        "status-danger": "$primitive.color.danger",
+        "status-danger-soft": "$primitive.color.dangerSoft",
+        "status-info": "$primitive.color.info",
+        "status-info-soft": "$primitive.color.infoSoft"
+      },
+      "space": {
+        "xxs": "$primitive.space.1",
+        "xs": "$primitive.space.2",
+        "sm": "$primitive.space.3",
+        "md": "$primitive.space.4",
+        "lg": "$primitive.space.5",
+        "xl": "$primitive.space.6"
+      },
+      "radius": {
+        "control": "$primitive.radius.xs",
+        "card": "$primitive.radius.md",
+        "window": "$primitive.radius.lg",
+        "pill": "$primitive.radius.pill"
+      },
+      "type": {
+        "display": "$primitive.type.display",
+        "heading": "$primitive.type.heading",
+        "body": "$primitive.type.body",
+        "control": "$primitive.type.control",
+        "caption": "$primitive.type.caption",
+        "mono": "$primitive.type.mono"
+      },
+      "motion": {
+        "instant": "$primitive.motion.instant",
+        "fast": "$primitive.motion.fast",
+        "normal": "$primitive.motion.normal",
+        "slow": "$primitive.motion.slow"
+      }
+    },
+    "component": {
+      "button": {
+        "height": {
+          "sm": 28,
+          "md": 36,
+          "lg": 44
+        }
+      },
+      "field": {
+        "height": 40
+      },
+      "badge": {
+        "height": 20
+      },
+      "card": {
+        "padding": 16
+      }
+    }
+  },
+  "a11y": {
+    "minContrast": "AA",
+    "minContrastRatio": {
+      "normal": 4.5,
+      "large": 3.0,
+      "aaaNormal": 7.0,
+      "aaaLarge": 4.5
+    },
+    "minTouchTargetPx": 44,
+    "focusVisible": {
+      "enabled": true,
+      "widthPx": 2,
+      "offsetPx": 2
+    },
+    "reducedMotion": true,
+    "neverColorOnly": true,
+    "screenReaderLabels": true
+  },
+  "states": [
+    "default",
+    "hover",
+    "focus",
+    "disabled",
+    "empty",
+    "loading",
+    "error",
+    "success"
+  ]
+}
+```
+<!-- design-contract:v1:end -->
 
 ---
 

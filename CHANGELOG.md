@@ -3,6 +3,44 @@
 One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
 `HARNESS_VERSION` are always identical.
 
+## 3.2.1 — Fail-closed discovery, core layout, and release hygiene
+
+- **Fail-closed `find_design()`:** removed the automatic fallback to the skill
+  package's `DESIGN.md`. Running a script from a project without a manifest now
+  raises an actionable `DesignManifestError` that suggests copying the starter
+  (`cp <skill>/references/DESIGN.md ./DESIGN.md`) or setting
+  `FIGCRAFT_DESIGN_MANIFEST`. The package manifest is available only through an
+  explicit internal opt-in (`allow_package_fallback=True` or
+  `FIGCRAFT_ALLOW_PACKAGE_DESIGN=1`) for the bundled demo and self-tests. Added
+  tests that prove external-directory calls fail closed and that the opt-in is
+  strictly explicit.
+- **Valid starter template:** `references/DESIGN.md` now carries a compact but
+  complete `design-contract/v1` JSON block that passes `json.loads()` and
+  `validate()` on first run; the README Quick Start points to it.
+- **Installer:** `--help` and `--dry-run`, `pwd -P` source resolution, `with`
+  handlers in both version-check heredocs, explicit copy of `DESIGN.md`,
+  `CONTRIBUTING.md`, and `docs/assets/showcase/`, harness verification from
+  inside `DEST` with visible stderr on failure, and `python3 -B` for a
+  cache-free test run. Re-running is idempotent and touches nothing outside the
+  target directory.
+- **Core layout decoupled:** `resolve_tree_layout()` moved into
+  `figcraft_tool.py`, so `FigcraftDocument.save()` no longer imports the
+  reference demo. `build_artistic_flow.py` is an explicitly invoked demo with
+  `--help` / `--out-dir` and lazy manifest loading.
+- **Resource and code hygiene:** worker sockets are closed and reset on connect
+  failure and in `close()`; the worker has `--help` / `--out` and no dead import;
+  relative design paths resolve against cwd first; all `archive.open()` calls
+  and `ZipFile` temp files are cleaned up; child processes are reaped on stop or
+  failed startup; every polling loop has an explicit cut-loop guard; dead
+  imports and the unused auditor `root_id` parameter are gone. Docstrings now
+  report `3.2.1`.
+- **Documentation:** `SKILL.md` is under 500 lines and public-facing; maintainer
+  process notes moved to `CONTRIBUTING.md`. Corrected the `watch`, parallel ID
+  namespace (`A 1000–1999`, `B 2000–2999`), and `frames --json` descriptions;
+  added Troubleshooting and Linux `FIGCRAFT_APP` guidance.
+- **Version lock:** `VERSION`, `SKILL.md` frontmatter, `HARNESS_VERSION`, script
+  docstrings, hygiene tests, and this changelog all move to `3.2.1`.
+
 ## 3.2.0 — Three boards, smart reuse, and a board-scoped audit
 
 - **Mandatory 3-board standard:** generators now place three adjacent

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Objective render audit for kuron-design-figcraft 3.2.0.
+"""Objective render audit for kuron-design-figcraft 3.2.1.
 
 Numeric evidence replaces "the PNG looks right": canvas utilisation, text
 overflow, child content escaping frame bounds, disabled clipping, connector
@@ -243,8 +243,7 @@ def is_wrapper_card(node: Dict[str, Any]) -> bool:
     return corner_radius(node) < min(width, height) / 2.0 - 1.0
 
 
-def audit_labels(nodes: Dict[str, Any], screen_id: Any, root_id: Any,
-                 label: str) -> None:
+def audit_labels(nodes: Dict[str, Any], screen_id: Any, label: str) -> None:
     """Rule S-15: every board item needs a descriptive English name/label."""
     for node_id in subtree(nodes, screen_id):
         node = nodes.get(node_id)
@@ -265,8 +264,7 @@ def audit_labels(nodes: Dict[str, Any], screen_id: Any, root_id: Any,
                      % (node_id, characters))
 
 
-def audit_card_fit(nodes: Dict[str, Any], screen_id: Any, root_id: Any,
-                   label: str) -> None:
+def audit_card_fit(nodes: Dict[str, Any], screen_id: Any, label: str) -> None:
     """Rule S-16: wrapper cards contain their children and fit their content."""
     for node_id in subtree(nodes, screen_id):
         node = nodes.get(node_id)
@@ -304,8 +302,8 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
     screen = nodes[str(screen_id)]
     name = screen.get("name", screen_id)
     label = ("%s / %s" % (page_label, name)) if page_label else name
-    audit_labels(nodes, screen_id, board_root, label)
-    audit_card_fit(nodes, screen_id, board_root, label)
+    audit_labels(nodes, screen_id, label)
+    audit_card_fit(nodes, screen_id, label)
     x0, y0, width, height = frame_box(screen)
     if not width or not height:
         return
@@ -479,7 +477,8 @@ def audit_file(path: str, screen_id: Optional[str] = None,
     SUMMARY.update({"labels": 0, "cards": 0})
     audit_contract_contrast()
     with zipfile.ZipFile(path) as archive:
-        document = json.load(archive.open("document.json"))
+        with archive.open("document.json") as handle:
+            document = json.load(handle)
     nodes = document.get("nodes", {})
     if screen_id:
         audit_screen(nodes, screen_id, root_id=screen_id)
