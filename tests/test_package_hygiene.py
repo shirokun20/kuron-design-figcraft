@@ -98,6 +98,18 @@ class HygieneTests(unittest.TestCase):
         scripts = os.listdir(os.path.join(ROOT, "scripts"))
         self.assertNotIn("build_notification_design.py", scripts)
 
+    def test_2026_pillars_documented(self):
+        skill = read_text(SKILL)
+        readme = read_text(os.path.join(ROOT, "README.md"))
+        reference = os.path.join(ROOT, "references", "product-designer-2026.md")
+        self.assertTrue(os.path.isfile(reference))
+        body = read_text(reference)
+        self.assertIn("Product Designer 2026", skill)
+        self.assertIn("Design Approach (2026 standard)", readme)
+        for needle in ("cognitive clarity", "Duplicate", "Zero \"Bolong\"",
+                       "Anti-Overthinking", "handoff", "bento"):
+            self.assertIn(needle, body, f"missing pillar content: {needle}")
+
 
 if __name__ == "__main__":
     unittest.main()

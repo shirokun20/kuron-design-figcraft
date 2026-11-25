@@ -77,6 +77,12 @@ sehingga baris 2+ menimpa node di bawahnya.
 Verifikasi tiap build: `lint_design()` **0 warning** DAN export PNG menunjukkan
 glyph/ikon benar-ter-render (membaca JSON saja tidak cukup).
 
+**Reuse (Duplicate → Refine):** sebelum membangun layar, salin node komponen
+yang sudah ada lalu sesuaikan bagian yang kurang tepat. Sertakan state nyata —
+`empty`, `loading/skeleton`, `error`, `disabled/focus`, dan variasi panjang
+teks/data — agar tidak ada layar "bolong". Rincian di
+`product-designer-2026.md`.
+
 ---
 
 ## 4. Loop Verifikasi Wajib 3–5x

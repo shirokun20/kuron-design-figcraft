@@ -46,6 +46,28 @@ set `FIGCRAFT_APP` if the FigCraft binary is not at the macOS default location.
 
 ---
 
+## Design Approach (2026 standard)
+
+This skill works as a modern product designer, not a screen generator:
+
+1. **Domain first.** Brief on app type, target user, main problem, and intended
+   outcome; then offer 2–3 layout/style directions (`dense operational`,
+   `bento/modular`, `editorial`, `clean utility`) for the user to steer. AI slop
+   and one-size-fits-all layouts are rejected in favour of cognitive clarity.
+2. **Full-spectrum UX.** Flows and information hierarchy, functional microcopy,
+   real `empty`/`loading`/`error`/`disabled/focus` states and data-length
+   variants, proportionate AI-status patterns, and accessible handoff-ready
+   composition — no "hollow" screens.
+3. **Component-first reuse.** Build base components with clear variants and a
+   `primitive → semantic → component` token hierarchy, then **duplicate and
+   refine** existing nodes for new screens instead of rebuilding from scratch.
+4. **Sharp execution.** Measured, decisive calls; short time-boxing; no
+   overthinking — with the zero-leak, green-tests, and 3–5x PNG checks intact.
+
+Full spec: `references/product-designer-2026.md`.
+
+---
+
 ## Package Structure
 
 ```text
@@ -58,6 +80,7 @@ kuron-design-figcraft/
 ├── .gitignore
 ├── install.sh                     # portable installer + version lock
 ├── references/
+│   ├── product-designer-2026.md   # 4 pillars: domain, full-spectrum UX, reuse, sharp execution
 │   ├── patterns.md                # --ks-* tokens, geometry, layout patterns
 │   ├── dark-artifact-rules.md     # dark rules, builder contract, 3–5x loop
 │   ├── light-glass-system.md      # light mode, glass, components, parity

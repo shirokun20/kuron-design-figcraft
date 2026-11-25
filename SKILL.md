@@ -32,6 +32,7 @@ Tidak bergantung pada path absolut, repo tertentu, atau kredensial apa pun.
 
 | Kebutuhan | Baca | Pakai script |
 |---|---|---|
+| Brief domain, opsi gaya UX/IA, state, handoff | `references/product-designer-2026.md` | — |
 | Token warna, tipografi, geometri, layout | `references/patterns.md` | `figcraft_tool.py`, `quick_design.py` |
 | Aturan gelap, builder, anti-asumsi, supremasi DESIGN.md | `references/dark-artifact-rules.md` | `figcraft_tool.py`, `build_artistic_flow.py` |
 | Light mode, glassmorphism, komponen & state | `references/light-glass-system.md` | `figcraft_tool.py` |
@@ -42,6 +43,28 @@ Tidak bergantung pada path absolut, repo tertentu, atau kredensial apa pun.
 Semua perintah di bawah dijalankan dari **root paket skill** ini. Path relatif
 bersifat portabel; `scripts/agent_terminal.py` mendukung flag global
 `--port <PORT>` yang ditulis **sebelum** subcommand.
+
+---
+
+## 0. Product Designer 2026 — Empat Pilar (gerbang sebelum desain)
+
+Rincian: `references/product-designer-2026.md`. Ringkasnya:
+
+1. **Domain → outcome → opsi gaya.** Brief 4 pertanyaan (jenis aplikasi, target
+   user, masalah, hasil terukur), lalu tawarkan 2–3 arah gaya/tata letak
+   (`dense operational`, `bento/modular`, `editorial`, `clean utility`) sesuai
+   konteks — pengguna yang memilih. Tolak AI slop; utamakan *cognitive clarity*.
+2. **Desain menyeluruh, zero "bolong".** UX flow + IA, microcopy fungsional
+   (aksi+objek, sebab+solusi), state lengkap (`empty`, `loading`, `error`,
+   `disabled/focus`, panjang teks/data), pola AI yang transparan bila relevan,
+   serta aksesibilitas & handoff yang realistis dibangun.
+3. **Component-first: `Duplicate → Refine`.** Bangun komponen dasar dulu
+   (input, form, button, icon, card/list item) dengan variant jelas dan
+   hierarki token `primitive → semantic → component`. Di FigCraft, salin node
+   komponen yang ada lalu sesuaikan — jangan rakit ulang dari nol per layar.
+4. **Eksekusi tajam.** Keputusan terukur dan langsung ke inti; time-box singkat,
+   tanpa analisis bertele-tele. Guardrail (0 path privat, 0 secret, test hijau,
+   PNG 3–5x) tetap mutlak.
 
 ---
 

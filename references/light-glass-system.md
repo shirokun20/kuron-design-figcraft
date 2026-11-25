@@ -120,7 +120,9 @@ Untuk alur live editing, gunakan `live-editing-workflow.md`.
 
 Semua komponen wajib memakai Auto-Layout dan mendukung state `Default`,
 `Hover`, `Focus` (`2px solid --ks-ring`, offset `2px`), dan `Disabled`
-(`opacity: 0.45`).
+(`opacity: 0.45`). Bangun komponen dasar lebih dulu, lalu **duplicate → refine**
+node komponen untuk layar turunan; lengkapi pula state `empty`, `loading`,
+`error`, dan variasi panjang teks (lihat `product-designer-2026.md`).
 
 | Komponen | Spesifikasi Anatomi & Ukuran | Variants & States |
 |---|---|---|

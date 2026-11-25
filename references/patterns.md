@@ -136,3 +136,8 @@ Grid 2 kolom + tab bar bawah 56px (touch target minimal 44px).
 3. Selalu sertakan `clip: true` pada frame level layar untuk memotong sudut
    melengkung 16px.
 4. **Samakan node by `name`, bukan ID** — ID numerik bisa bergeser antar save.
+5. **Component-first:** bangun komponen dasar dulu (input, form, button, icon,
+   card/list item) dengan variant jelas. Hierarki token:
+   `primitive → semantic → component → theme/state`. Untuk layar baru,
+   **duplicate** node komponen yang sudah ada lalu **refine** — jangan merakit
+   ulang dari nol. Lihat `product-designer-2026.md`.
