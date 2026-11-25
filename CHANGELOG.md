@@ -38,6 +38,10 @@ One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
   process notes moved to `CONTRIBUTING.md`. Corrected the `watch`, parallel ID
   namespace (`A 1000–1999`, `B 2000–2999`), and `frames --json` descriptions;
   added Troubleshooting and Linux `FIGCRAFT_APP` guidance.
+- **Demo GIF:** `docs/assets/demo.gif` records a real Generate → Live Terminal
+  → Live Editing → Live Audit & Export run (12 seconds, 1100x620, under 2.5 MB)
+  with generic prompts and no private paths; the README and installer include
+  it alongside the showcase PNGs.
 - **Version lock:** `VERSION`, `SKILL.md` frontmatter, `HARNESS_VERSION`, script
   docstrings, hygiene tests, and this changelog all move to `3.2.1`.
 

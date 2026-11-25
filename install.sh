@@ -96,7 +96,7 @@ fi
 # file outside DEST is touched, and no renamed file is left behind by this
 # installer (all package files keep their documented paths).
 mkdir -p "$DEST" "$DEST/references" "$DEST/scripts" "$DEST/tests" \
-  "$DEST/docs/assets/showcase" || fail "cannot create $DEST"
+  "$DEST/docs/assets" "$DEST/docs/assets/showcase" || fail "cannot create $DEST"
 
 cp "$SRC/SKILL.md" "$SRC/README.md" "$SRC/LICENSE" "$SRC/VERSION" \
    "$SRC/CHANGELOG.md" "$SRC/DESIGN.md" "$SRC/CONTRIBUTING.md" \
@@ -105,6 +105,8 @@ cp "$SRC"/references/*.md "$SRC"/references/*.css "$DEST/references/" \
   || fail "failed to copy references"
 cp "$SRC"/scripts/*.py "$DEST/scripts/" || fail "failed to copy scripts"
 cp "$SRC"/tests/*.py "$DEST/tests/" || fail "failed to copy tests"
+cp "$SRC/docs/assets/demo.gif" "$DEST/docs/assets/" \
+  || fail "failed to copy demo GIF"
 cp "$SRC"/docs/assets/showcase/* "$DEST/docs/assets/showcase/" \
   || fail "failed to copy showcase assets"
 echo "install: copied package to $DEST"

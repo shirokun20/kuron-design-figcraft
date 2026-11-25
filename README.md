@@ -8,6 +8,10 @@ It works with Claude Code, Codex, OpenCode, Cursor, and Orca. It needs no creden
 
 ## See it in action
 
+Watch the real v3.2.1 workflow — Generate → Live Terminal → Live Editing → Live Audit & Export:
+
+![kuron-design-figcraft live workflow demo](docs/assets/demo.gif)
+
 These screens were generated from a single `.figcraft` document. Each board lives on its own page and is exported from that page, much like organising a Figma file.
 
 ![02 Screens — the finished music dashboard: navigation, player, collections, and download list](docs/assets/showcase/02_Screens.png)
