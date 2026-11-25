@@ -119,6 +119,35 @@ the pair keeps fixing until all six guards pass — not until tests merely go gr
 
 ---
 
+## Field Showcase & Testimony
+
+A real three-board trial rendered from a single `.figcraft` document. Each board
+lives on its own dedicated page and was exported from that page, proving dynamic
+page separation rather than one crowded canvas.
+
+![00 Foundations — token, colour, and type foundations](docs/assets/showcase/00_Foundations.png)
+
+![01 Components — reusable specimen library](docs/assets/showcase/01_Components.png)
+
+![02 Screens — completed Stereo dashboard](docs/assets/showcase/02_Screens.png)
+
+What these renders demonstrate:
+
+- **Dynamic page separation.** `00_Foundations` → `01_Components` →
+  `02_Screens`, plus a second page `01_Reference`. Every board is exported from
+  its own page via `agent_terminal.py export --page-index`, so page selection is
+  real, not cosmetic.
+- **Cross-page Smart Reuse.** The dashboard on `02_Screens` duplicates the
+  templates in `01_Components` across pages (`duplicate -> refine`): nav items,
+  collection cards, download rows, avatars, and the play button are reused and
+  refined with fresh IDs instead of rebuilt.
+- **Automated validation.** `audit_render.py` reports `PASS: all screens passed
+  the render audit`, with **S-15** checking **484/484** descriptive English
+  labels and captions and **S-16** confirming **19/19** wrapper cards contain
+  and fit their content.
+
+---
+
 ## DESIGN.md contract (machine-parseable)
 
 `DESIGN.md` is mandatory. The parser extracts only the JSON between
@@ -161,6 +190,7 @@ kuron-design-figcraft/
 ├── VERSION                        # 3.2.0 — single source of truth
 ├── CHANGELOG.md
 ├── .gitignore
+├── docs/assets/showcase/          # field testimony PNGs (3 boards)
 ├── install.sh                     # portable installer + version lock
 ├── references/
 │   ├── DESIGN.md                  # MANDATORY contract + template (design-contract/v1)
