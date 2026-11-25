@@ -1,0 +1,151 @@
+/*
+ * kuron-design-figcraft — portable design tokens (v3.0.0)
+ *
+ * Single source of truth untuk semua warna, radius, font, dan glass.
+ * Namespace --ks-* adalah konvensi skill, bukan milik repo tertentu.
+ * Salin berkas ini ke konsumen, atau petakan token dengan nama yang sama.
+ * Dark = default; light = :root[data-theme="light"].
+ * Font di-bundel offline (fontsource), bukan CDN.
+ */
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --ks-bg: #0d0d10;
+  --ks-surface: #141418;
+  --ks-surface-2: #1a1a20;
+  --ks-raised: #22222a;
+  --ks-hover: #2a2a33;
+  --ks-selected: #34343f;
+
+  /* Lines & focus */
+  --ks-line: #26262e;
+  --ks-line-strong: #35353f;
+  --ks-ring: #9a9aa8;
+
+  /* Inks */
+  --ks-text: #ececf1;
+  --ks-text-2: #a5a6b0;
+  --ks-text-3: #71727d;
+
+  /* Accent (primary action only) */
+  --ks-accent: #ff6b5a;
+  --ks-accent-hover: #ff8272;
+  --ks-accent-fg: #1a0a08;
+  --ks-accent-soft: #2e1614;
+
+  /* Technical data (monospace only) */
+  --ks-cyan: #35e7f5;
+  --ks-cyan-soft: #0e2a2e;
+
+  /* Status */
+  --ks-success: #5fd99a;
+  --ks-success-soft: #10281d;
+  --ks-warn: #ffc15e;
+  --ks-warn-soft: #2b2110;
+  --ks-danger: #ff5c5c;
+  --ks-danger-soft: #2e1416;
+  --ks-info: #6ba6ff;
+  --ks-info-soft: #111e33;
+
+  /* Illustration helpers */
+  --ks-illust-solid: #221f1b;
+  --ks-illust-on-solid: #fffdf9;
+  --ks-illust-on-solid-muted: #b9b2a6;
+
+  /* Glass fallback (dark) */
+  --ks-glass-bg: rgba(34, 34, 42, 0.72);
+  --ks-glass-toolbar: rgba(26, 26, 32, 0.78);
+  --ks-glass-floating: rgba(42, 42, 51, 0.88);
+  --ks-glass-specular: rgba(255, 255, 255, 0.14);
+  --ks-glass-border: rgba(236, 236, 241, 0.10);
+  --ks-glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.16);
+
+  /* Type & geometry */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk Variable", "Inter Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --radius-card: 0.75rem;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surfaces */
+  --ks-bg: #f7f6f4;
+  --ks-surface: #ffffff;
+  --ks-surface-2: #f1f0ed;
+  --ks-raised: #e8e7e3;
+  --ks-hover: #deddd8;
+  --ks-selected: #d8d7d1;
+
+  /* Lines & focus */
+  --ks-line: #dfdfd9;
+  --ks-line-strong: #c4c3bc;
+  --ks-ring: #55555f;
+
+  /* Inks */
+  --ks-text: #16161a;
+  --ks-text-2: #55555f;
+  --ks-text-3: #7c7c86;
+
+  /* Accent (same role, different value) */
+  --ks-accent: #c4342a;
+  --ks-accent-hover: #a62a21;
+  --ks-accent-fg: #ffffff;
+  --ks-accent-soft: #fbe9e7;
+
+  /* Technical data */
+  --ks-cyan: #0b6e78;
+  --ks-cyan-soft: #e0f2f4;
+
+  /* Status */
+  --ks-success: #1f7a4d;
+  --ks-success-soft: #e4f3ea;
+  --ks-warn: #8a5a00;
+  --ks-warn-soft: #fbf0dc;
+  --ks-danger: #b3261e;
+  --ks-danger-soft: #fde8e6;
+  --ks-info: #1f5fbf;
+  --ks-info-soft: #e5eefb;
+
+  /* Illustration helpers — parity with dark */
+  --ks-illust-solid: #221f1b;
+  --ks-illust-on-solid: #fffdf9;
+  --ks-illust-on-solid-muted: #b9b2a6;
+
+  /* Glass */
+  --ks-glass-bg: rgba(255, 255, 255, 0.72);
+  --ks-glass-toolbar: rgba(241, 240, 237, 0.78);
+  --ks-glass-floating: rgba(255, 255, 255, 0.88);
+  --ks-glass-specular: rgba(255, 255, 255, 0.70);
+  --ks-glass-border: rgba(22, 22, 26, 0.08);
+  --ks-glass-shadow: 0 8px 24px rgba(22, 22, 26, 0.08), 0 1px 2px rgba(22, 22, 26, 0.04);
+}
+
+/* Tint selalu turunan token — paritas dark/light otomatis. */
+.ks-tint-accent { background: color-mix(in srgb, var(--ks-accent) 12%, transparent); }
+.ks-tint-cyan   { background: color-mix(in srgb, var(--ks-cyan) 12%, transparent); }
+
+/* Fokus keyboard: penanda posisi, bukan aksi/dekorasi. */
+:focus-visible {
+  outline: 2px solid var(--ks-ring);
+  outline-offset: 2px;
+}
+
+/* Baris terpilih persisten, SELALU beda dari hover. */
+[data-current="true"] { background-color: var(--ks-selected); }
+
+/* Angka tabular di badge/koordinat. */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Hormati prefers-reduced-motion per elemen. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

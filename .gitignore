@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# FigCraft runtime artifacts
+.figcraft.pid
+.figcraft.port
+*.figcraft.lock
+out/
+previews/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local test output
+*.log
