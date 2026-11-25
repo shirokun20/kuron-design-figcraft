@@ -6,11 +6,14 @@ overflow, child content escaping frame bounds, disabled clipping, connector
 topology, dot semantics, and WCAG contrast in **both** themes. Every check
 cites the rule ID it enforces.
 
-Every top-level frame on ``pages[0]`` is audited as its own board. Traversal,
-contrast ancestry, and layout checks are scoped to that board, so adjacent
-boards never create false positives; board overlap is checked separately.
+Every top-level frame on every page (``pages[0..N]``) is audited as its own
+board. Traversal, contrast ancestry, and layout checks are scoped to that
+board, so adjacent boards and other pages never create false positives; board
+overlap is checked separately per page. A specific page can be selected by
+index or name.
 
 Usage: python3 scripts/audit_render.py <file.figcraft> [--screen ID]
+       [--page-index N | --page-name NAME]
 Exit 0 = all checks pass; 1 = at least one failure.
 """
 
@@ -82,7 +85,9 @@ def absolute_box(nodes: Dict[str, Any], node_id: Any, root_id: Any = None):
         if root_id is not None and current == str(root_id):
             return x, y, width, height
         parent = node.get("parent")
-        if parent is None or str(parent) == current or str(parent) == "1":
+        parent_node = nodes.get(str(parent))
+        if (parent is None or str(parent) == current
+                or (isinstance(parent_node, dict) and parent_node.get("type") == "page")):
             return x, y, width, height
         current = str(parent)
     return x, y, 0.0, 0.0
@@ -190,11 +195,13 @@ def audit_contract_contrast() -> None:
 
 
 def audit_screen(nodes: Dict[str, Any], screen_id: Any,
-                 root_id: Any = None) -> None:
-    """Audit one board (or an explicitly selected screen), scoped to its root."""
+                 root_id: Any = None,
+                 page_label: Optional[str] = None) -> None:
+    """Audit one board on a page, scoped to its root."""
     board_root = root_id if root_id is not None else screen_id
     screen = nodes[str(screen_id)]
     name = screen.get("name", screen_id)
+    label = ("%s / %s" % (page_label, name)) if page_label else name
     x0, y0, width, height = frame_box(screen)
     if not width or not height:
         return
@@ -205,19 +212,19 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
     # frame. Empty layout wrappers (Body, Canvas, ...) never count as content.
     bounds = content_bounds(nodes, screen_id, root_id=board_root)
     if bounds is None:
-        note(name, "S-06", "canvas utilisation 0% < 60% (no visible leaf content)")
+        note(label, "S-06", "canvas utilisation 0% < 60% (no visible leaf content)")
     else:
         content_left, content_top, content_right, content_bottom = bounds
         utilisation = ((content_right - content_left)
                        * (content_bottom - content_top)) / (width * height)
         if utilisation < 0.60:
-            note(name, "S-06", "canvas utilisation %.0f%% < 60%%" % (utilisation * 100))
+            note(label, "S-06", "canvas utilisation %.0f%% < 60%%" % (utilisation * 100))
         if y0 + height - content_bottom > 150 and "Flow" not in str(name):
-            note(name, "S-06", "more than 150px of dead space at the bottom")
+            note(label, "S-06", "more than 150px of dead space at the bottom")
 
     # Clipping: a screen frame must contain its own content.
     if screen.get("clip") is False:
-        note(name, "S-11", "screen frame has clip: false — enable clipping")
+        note(label, "S-11", "screen frame has clip: false — enable clipping")
 
     # Text overflow, border escapes, and contrast.
     thresholds = contrast_thresholds()
@@ -241,17 +248,17 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
             except (IndexError, TypeError, ValueError):
                 inner_width, inner_height, bottom = float(parent_width), 0.0, 0.0
             if parent_width and current.get("width", 0) > inner_width + 1:
-                note(name, "S-08", "text '%s' overflows horizontally (%.0f > %.0f)"
+                note(label, "S-08", "text '%s' overflows horizontally (%.0f > %.0f)"
                      % (current.get("name"), current.get("width", 0), inner_width))
             if inner_height and bottom > inner_height + 1:
-                note(name, "S-10", "text '%s' overflows vertically (%.0f > %.0f)"
+                note(label, "S-10", "text '%s' overflows vertically (%.0f > %.0f)"
                      % (current.get("name"), bottom, inner_height))
 
             foreground = first_paint_hex(current)
             background = ancestor_fill(nodes, current, root_id=board_root)
             ratio = contrast_ratio(foreground, background) if foreground and background else None
             if ratio is not None and ratio + 1e-9 < thresholds["required"]:
-                note(name, "S-12", "text '%s' contrast %.2f:1 below %s %.2f:1"
+                note(label, "S-12", "text '%s' contrast %.2f:1 below %s %.2f:1"
                      % (current.get("name"), ratio, thresholds["level"],
                         thresholds["required"]))
 
@@ -266,7 +273,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
             _, _, pw, ph = frame_box(parent)
             if pw and ph and (cx < -1 or cy < -1
                               or cx + cw > pw + 1 or cy + ch > ph + 1):
-                note(name, "S-11", "node '%s' escapes parent '%s' bounds"
+                note(label, "S-11", "node '%s' escapes parent '%s' bounds"
                      % (current.get("name"), parent.get("name")))
 
     # Connector topology: a connector must be anchored at both ends.
@@ -276,7 +283,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
             continue
         vertices = child.get("network", {}).get("vertices", [])
         if not vertices:
-            note(name, "S-03", "connector '%s' has no vertices" % child.get("name"))
+            note(label, "S-03", "connector '%s' has no vertices" % child.get("name"))
             continue
         points = [(v["x"], v["y"]) for v in vertices]
         anchored = 0
@@ -289,7 +296,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
                     anchored += 1
                     break
         if anchored < 2:
-            note(name, "S-03", "connector '%s' is orphaned (%d/2 ends attached)"
+            note(label, "S-03", "connector '%s' is orphaned (%d/2 ends attached)"
                  % (child.get("name"), anchored))
 
     # Dot semantics: completion/cancellation/prerequisite colours.
@@ -317,7 +324,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
             elif "PREREQ" in titles or "IZIN" in titles:
                 expected = colors["status-warn"]
             if expected and fill.lower() != str(expected).lower():
-                note(name, "S-13", "dot '%s' uses %s, expected %s"
+                note(label, "S-13", "dot '%s' uses %s, expected %s"
                      % (node_name, fill, expected))
 
 
@@ -337,8 +344,32 @@ def audit_board_overlap(nodes: Dict[str, Any], board_ids: List[int],
                         overlap_w, overlap_h))
 
 
-def audit_file(path: str, screen_id: Optional[str] = None) -> List[str]:
-    """Audit every board in a .figcraft file; returns the shared failure list."""
+def resolve_page_ids(document: Dict[str, Any], nodes: Dict[str, Any],
+                     page_index: Optional[int] = None,
+                     page_name: Optional[str] = None) -> List[int]:
+    """Resolve page ids for ``pages[0..N]`` by name, index, or all by default."""
+    ids = [int(pid) for pid in (document.get("pages") or [])]
+    if page_name is not None:
+        matches = [pid for pid in ids
+                   if str(nodes.get(str(pid), {}).get("name")) == page_name]
+        if not matches:
+            available = [str(nodes.get(str(pid), {}).get("name")) for pid in ids]
+            raise ValueError("page %r not found; available pages: %s"
+                             % (page_name, ", ".join(available)))
+        return matches
+    if page_index is not None:
+        index = int(page_index)
+        if index < 0 or index >= len(ids):
+            raise ValueError("page_index %d is out of range for %d page(s)"
+                             % (index, len(ids)))
+        return [ids[index]]
+    return ids
+
+
+def audit_file(path: str, screen_id: Optional[str] = None,
+               page_index: Optional[int] = None,
+               page_name: Optional[str] = None) -> List[str]:
+    """Audit every board on every page of a .figcraft file."""
     FAIL.clear()
     audit_contract_contrast()
     with zipfile.ZipFile(path) as archive:
@@ -347,8 +378,10 @@ def audit_file(path: str, screen_id: Optional[str] = None) -> List[str]:
     if screen_id:
         audit_screen(nodes, screen_id, root_id=screen_id)
     else:
-        for page_index, page_id in enumerate(document.get("pages", [1])):
+        for page_id in resolve_page_ids(document, nodes, page_index, page_name):
             page = nodes.get(str(page_id), {})
+            label = "page '%s'" % page.get("name") if page.get("name") \
+                else "pages[%d]" % page_id
             board_ids = [
                 int(child_id) for child_id in page.get("children", [])
                 if isinstance(nodes.get(str(child_id)), dict)
@@ -356,10 +389,9 @@ def audit_file(path: str, screen_id: Optional[str] = None) -> List[str]:
             ]
             if not board_ids:
                 continue
-            audit_board_overlap(nodes, board_ids,
-                                "pages[%d]" % page_index)
+            audit_board_overlap(nodes, board_ids, label)
             for board_id in board_ids[:MAX_BOARDS]:
-                audit_screen(nodes, board_id, root_id=board_id)
+                audit_screen(nodes, board_id, root_id=board_id, page_label=label)
     return FAIL
 
 
@@ -367,8 +399,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Objective FigCraft render audit")
     parser.add_argument("file", help="Path to a .figcraft file")
     parser.add_argument("--screen", help="Audit only this screen id")
+    page_group = parser.add_mutually_exclusive_group()
+    page_group.add_argument("--page-index", type=int,
+                            help="Audit only this page index (0-based)")
+    page_group.add_argument("--page-name", help="Audit only this page name")
     args = parser.parse_args()
-    failures = audit_file(args.file, args.screen)
+    failures = audit_file(args.file, args.screen,
+                          page_index=args.page_index, page_name=args.page_name)
     if failures:
         print("FAIL:")
         for failure in failures:

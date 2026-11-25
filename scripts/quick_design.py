@@ -5,8 +5,9 @@ Every colour, font size, spacing step, component size, and microcopy string is
 resolved from the project's ``DESIGN.md`` through ``design_manifest.py``. The
 ``--generate`` flag builds Components, Screen, or Form nodes for Live Generate
 sessions, and the layout is driven by ``style_direction``. The ``three-board``
-preset creates ``00_Foundations``, ``01_Components``, and ``02_Screens`` on
-``pages[0]``; screens duplicate existing components instead of rebuilding them.
+preset creates ``00_Foundations``, ``01_Components``, and ``02_Screens`` on the
+selected page of ``pages[0..N]``; screens duplicate existing components instead
+of rebuilding them.
 
 All network operations use timeouts; the preview worker is always terminated.
 """
@@ -626,8 +627,8 @@ def build_foundations(doc: FigcraftDocument, board_id: int,
     """Fill a Foundations board with colour, type, spacing, and radius tokens.
 
     Every value is resolved from DESIGN.md through the shared builder tokens.
-    The board is a normal top-level frame, so the engine's ``pages[0]`` loader
-    sees it together with its sibling boards.
+    The board is a normal top-level frame on whichever page the caller chose,
+    so it stays visible alongside its sibling boards in every tool.
     """
     board = doc.doc["nodes"][str(board_id)]
     board_w = float(width or board.get("width", SCREEN_W))
@@ -787,11 +788,14 @@ def generate_screen_from_components(doc: FigcraftDocument, screen_id: int,
     return screen_id
 
 
-def generate_three_boards(doc: FigcraftDocument,
-                          style: Optional[str] = None) -> Dict[str, int]:
-    """Create the three adjacent design-system boards on ``pages[0]``.
+def generate_three_boards(doc: FigcraftDocument, style: Optional[str] = None,
+                          page_index: Optional[int] = 0,
+                          page_name: Optional[str] = None) -> Dict[str, int]:
+    """Create the three adjacent design-system boards on a selected page.
 
-    Existing boards and components are reused, never rebuilt. Screens duplicate
+    ``page_index`` defaults to 0 so the live canvas shows the result first, but
+    any page in ``pages[0..N]`` can be targeted by index or name. Existing
+    boards and components are reused, never rebuilt. Screens duplicate
     component nodes from ``01_Components`` so a change there propagates through
     every instance created by this generator.
     """
@@ -803,17 +807,19 @@ def generate_three_boards(doc: FigcraftDocument,
         boards[name] = ft.ensure_board(
             doc, name, x=x, y=BOARD_Y, width=board_w, height=board_h,
             fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
-            clip=True,
+            clip=True, page_index=page_index, page_name=page_name,
         )
 
     foundations = boards[BOARD_NAMES[0]]
-    if ft.find_or_reuse_component(doc, "FoundationTitle", parent_id=foundations) is None:
+    if ft.find_or_reuse_component(doc, "FoundationTitle",
+                                  parent_id=foundations) is None:
         build_foundations(doc, foundations, width=board_w, height=board_h)
 
     components = boards[BOARD_NAMES[1]]
     library = ft.find_or_reuse_component(
         doc, "Components", parent_id=components,
         builder=lambda: generate_components(doc, components, style=style),
+        page_index=page_index, page_name=page_name,
     )
     if library is not None:
         # Base specimens let screens duplicate Card/Input/Row, not rebuild them.
@@ -823,7 +829,8 @@ def generate_three_boards(doc: FigcraftDocument,
     boards["components_library"] = int(library) if library is not None else 0
 
     screens = boards[BOARD_NAMES[2]]
-    if ft.find_or_reuse_component(doc, "QuickDesign_Screen", parent_id=screens) is None:
+    if ft.find_or_reuse_component(doc, "QuickDesign_Screen",
+                                  parent_id=screens) is None:
         screen = doc.create_frame(
             "QuickDesign_Screen", screens, SCREEN_W, SCREEN_H,
             x=SPACE["xl"], y=SPACE["xl"] * 3,
@@ -892,11 +899,13 @@ def generate_live(kind: str, doc_name: str, style: Optional[str] = None,
 # ---------------------------------------------------------------------------
 # PRESET GENERATORS
 # ---------------------------------------------------------------------------
-def generate_preset(preset_name: str, doc_name: str = "QuickDesign") -> FigcraftDocument:
+def generate_preset(preset_name: str, doc_name: str = "QuickDesign",
+                    page_index: Optional[int] = 0,
+                    page_name: Optional[str] = None) -> FigcraftDocument:
     """Generate a complete preset document from tokens."""
     doc = FigcraftDocument(doc_name)
     if preset_name == "three-board":
-        generate_three_boards(doc)
+        generate_three_boards(doc, page_index=page_index, page_name=page_name)
         return doc
     if preset_name == "dashboard":
         screen = doc.create_frame(text("project_dashboard"), 1, SCREEN_W, SCREEN_H,
@@ -986,13 +995,31 @@ def preview_app_binary() -> str:
                           "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 
 
-def export_preview(output_path: str, port: int = 9880) -> bool:
+def select_inspect_page(info: Dict[str, Any], page_index: Optional[int] = 0,
+                        page_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Pick a page from a live ``document.inspect`` payload by index or name."""
+    pages = (info.get("result", {}).get("pages", []) or [])
+    if page_name is not None:
+        for page in pages:
+            if isinstance(page, dict) and str(page.get("name")) == page_name:
+                return page
+        return None
+    index = 0 if page_index is None else int(page_index)
+    if 0 <= index < len(pages) and isinstance(pages[index], dict):
+        return pages[index]
+    return None
+
+
+def export_preview(output_path: str, port: int = 9880,
+                   page_index: Optional[int] = 0,
+                   page_name: Optional[str] = None) -> bool:
     """Render ``<name>_preview.png`` through the live FigCraft bridge.
 
     Returns True only when a PNG was actually written. Every path — missing
     binary, failed launch, bad RPC, failed export — ends with an honest status
     line. A process started here is always stopped and the socket always
-    closed, so no child or connection is leaked.
+    closed, so no child or connection is leaked. ``page_index`` / ``page_name``
+    select the page whose first board is exported.
     """
     out_base, _ = os.path.splitext(output_path)
     preview_png = out_base + "_preview.png"
@@ -1030,8 +1057,9 @@ def export_preview(output_path: str, port: int = 9880) -> bool:
     try:
         if client.connect(timeout=2.0):
             info = client.document_inspect()
-            pages = info.get("result", {}).get("pages", [])
-            children = pages[0].get("children", []) if pages else []
+            page = select_inspect_page(info, page_index=page_index,
+                                       page_name=page_name)
+            children = page.get("children", []) if page else []
             node_id = children[0].get("id") if children else None
             if node_id:
                 res = client.export_frame(node_id, abs_png, format="png", scale=1.0)
@@ -1072,6 +1100,10 @@ def main() -> None:
                              "(otherwise report that no PNG was generated)")
     parser.add_argument("--port", type=int, default=9880,
                         help="Control port (default 9880, shared with agent_terminal)")
+    parser.add_argument("--page-index", type=int, default=0,
+                        help="Target page index for generated boards (default: 0)")
+    parser.add_argument("--page-name",
+                        help="Target page name (overrides --page-index)")
     args = parser.parse_args()
 
     if args.generate:
@@ -1095,7 +1127,8 @@ def main() -> None:
             selected = "workbench"
         print("\n[QuickDesign] Generating: %s (style=%s)" % (selected.upper(), STYLE))
         use_theme(args.theme)
-        doc = generate_preset(selected, args.prompt or text("app_name"))
+        doc = generate_preset(selected, args.prompt or text("app_name"),
+                              page_index=args.page_index, page_name=args.page_name)
 
     for warning in lint_design(doc):
         print("[lint] %s" % warning, file=sys.stderr)
@@ -1103,7 +1136,8 @@ def main() -> None:
     print("Created .figcraft file: %s" % args.output)
 
     if args.preview:
-        export_preview(args.output, port=args.port)
+        export_preview(args.output, port=args.port,
+                       page_index=args.page_index, page_name=args.page_name)
 
     print("Done. Ready to inspect or iterate.\n")
 

@@ -160,9 +160,11 @@ is **optional** by direction — `editorial`/`clean_utility` may omit it.
 
 ### 3.1 Three-Board Standard and Smart Reuse (mandatory)
 
-Because the engine and the exporter load `pages[0]` only, a design system is
-three adjacent top-level frames on that page, separated by a clean horizontal
-gap derived from the space tokens (`BOARD_GAP`, normally `120px`):
+A design system is three adjacent top-level frames on a selected page of
+`pages[0..N]`, separated by a clean horizontal gap derived from the space
+tokens (`BOARD_GAP`, normally `120px`). The three boards default to `pages[0]`
+because the live canvas displays that page first, but every script accepts a
+`page_index` / `page_name` selector and preserves later pages untouched:
 
 | Board | Content | Rule |
 |---|---|---|
@@ -179,9 +181,17 @@ and change only the required properties, text, or coordinates. Use
 repeated component from scratch in a screen. `generate_three_boards()` in
 `quick_design.py` implements this end to end and is idempotent.
 
-`audit_render.py` audits each top-level board independently and scopes
-contrast and layout checks to that board, so the three neighbours cannot
-produce cross-board false positives.
+`audit_render.py` audits each top-level board on every page independently and
+scopes contrast and layout checks to that board, so neither neighbouring
+boards nor other pages can produce false positives. Use `--page-index` or
+`--page-name` to filter the audit or the terminal's `frames` / `export-all`
+commands to one page.
+
+**Engine honesty:** the live FigCraft canvas may display `pages[0]` by default
+and its `document.inspect` output can truncate on very large documents. That
+is a viewer behaviour, not a file limitation: `.figcraft` documents, offline
+builders, reflow, the auditor, and the terminal are all multi-page compatible
+and keep `pages[1..N]` intact. Verify later pages with the page selectors.
 
 ---
 
@@ -370,7 +380,9 @@ Three hard rules:
    `create_vector` output.
 3. **Schema from live `save_file`, not a guess:** read `document.json` from the
    saved zip as the render contract.
-4. **Engine loads only `pages[0]`:** subtrees on other pages are invisible.
+4. **Live canvas shows `pages[0]` by default:** later pages stay in the file
+   and are handled by every script with page selectors; verify them with
+   `--page-index` / `--page-name` instead of assuming they are lost.
 5. **`open_file` is cached per path:** headless edit then reopening the same
    path is stale; force reload via close+open.
 6. **`save()` always reflows:** do not tune `y` manually — fix the structure

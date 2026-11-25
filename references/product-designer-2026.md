@@ -134,9 +134,11 @@ That is what separates a living screen from a UI skin.
    for every screen — that is a source of inconsistency and slow iteration.
 4. **The three-board container:** `00_Foundations` (tokens from `DESIGN.md`),
    `01_Components` (bases and variants), and `02_Screens` (screens built by
-   duplicating nodes from `01_Components`) are adjacent top-level frames on
-   `pages[0]`, the only page the engine loads. `quick_design.py --preset
-   three-board` implements this standard.
+   duplicating nodes from `01_Components`) are adjacent top-level frames on any
+   page in `pages[0..N]`; the default `pages[0]` is simply what the live canvas
+   shows first. `quick_design.py --preset three-board` implements this standard
+   with `page_index` / `page_name` selectors, and smart reuse can copy
+   components across pages.
 5. Changes to a parent component propagate to descendants. Node names stay
    semantic (`Btn_<Action>`, `Card_<Name>`); match by `name`, not ID.
 6. Component states follow `states` in `DESIGN.md`; do not add ad hoc states that

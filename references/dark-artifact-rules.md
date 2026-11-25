@@ -156,8 +156,10 @@ Four assumptions proven wrong by render evidence — do not repeat them:
 3. **Schema from live `save_file`, not a guess.** Create a node through the live
    API → `save_file` → read `document.json` from the zip. That is the engine's
    rendering contract.
-4. **The engine loads only the first page.** Subtrees on page two are invisible;
-   diagrams must be in `pages[0]` or a separate file — verify via `frames`.
+4. **The live canvas shows the first page by default.** The `.figcraft` file and
+   every bundled script are multi-page (`pages[0..N]`): reflow and save preserve
+   later pages. Use `--page-index` / `--page-name` on `frames`, `export-all`, and
+   `audit_render.py` to verify a specific page rather than assuming it is lost.
 5. **`open_file` is cached per path.** Headless edit then reopen the same path =
    stale. Force a reload: open another file first, then reopen the target.
 

@@ -236,6 +236,28 @@ def extract_frames(inspect_payload: Any) -> Tuple[List[Dict[str, Any]], Dict[str
     return frames, debug
 
 
+def select_inspect_page(inspect_payload: Any, page_index: Optional[int] = None,
+                        page_name: Optional[str] = None):
+    """Select one page payload from ``document.inspect`` (``pages[0..N]``).
+
+    Returns ``(page_payload, page_index)``; ``(None, None)`` means the requested
+    page was not found, so callers can report an actionable error.
+    """
+    tree = _unwrap_inspect(inspect_payload)
+    pages = tree.get("pages") if isinstance(tree, dict) else None
+    if not isinstance(pages, list) or not pages:
+        return None, None
+    if page_name is not None:
+        for index, page in enumerate(pages):
+            if isinstance(page, dict) and str(page.get("name")) == page_name:
+                return page, index
+        return None, None
+    index = 0 if page_index is None else int(page_index)
+    if 0 <= index < len(pages) and isinstance(pages[index], dict):
+        return pages[index], index
+    return None, None
+
+
 def _find_node(obj: Any, wanted: str, depth: int = 0) -> Optional[Dict[str, Any]]:
     """Depth-first search for a node whose id matches *wanted* (string-compared)."""
     if depth > 25:
@@ -485,22 +507,34 @@ class FigcraftTerminal:
             "inspection": inspect_res.get("result", inspect_res)
         }
 
-    def list_frames(self) -> Dict[str, Any]:
-        """Return screen-level frames (id, name, x/y/w/h) via document.inspect.
+    def list_frames(self, page_index: Optional[int] = None,
+                    page_name: Optional[str] = None) -> Dict[str, Any]:
+        """Return frames on a selected page of ``pages[0..N]``.
 
         Large documents can exceed the engine's inspect output limit. A bounded
-        depth-1 request keeps the payload small and still returns every
-        top-level board; the full payload is the fallback for older engines.
+        depth-1 request keeps the payload small; the full payload is the
+        fallback for older engines. ``page_index`` / ``page_name`` scope the
+        result to one page, while the default covers the active document.
         """
         inspect_res = self.send_rpc("document.inspect", {"depth": 1})
-        frames, debug = extract_frames(inspect_res)
+        page, selected = select_inspect_page(inspect_res, page_index, page_name)
+        frames, debug = extract_frames(page if page is not None else inspect_res)
         if not frames or (not inspect_res.get("ok", True) and inspect_res.get("error")):
             full_res = self.send_rpc("document.inspect")
-            full_frames, full_debug = extract_frames(full_res)
+            full_page, full_selected = select_inspect_page(
+                full_res, page_index, page_name)
+            full_frames, full_debug = extract_frames(
+                full_page if full_page is not None else full_res)
             if full_frames and full_res.get("ok", True):
                 inspect_res, frames, debug = full_res, full_frames, full_debug
+                page, selected = full_page, full_selected
         if not inspect_res.get("ok", True) and inspect_res.get("error"):
             return {"ok": False, "error": inspect_res.get("error"), "engine_result": inspect_res}
+        if (page_index is not None or page_name is not None) and page is None:
+            selector = ("page_name=%r" % page_name) if page_name is not None \
+                else ("page_index=%s" % page_index)
+            return {"ok": False, "error": "Page not found for %s." % selector,
+                    "engine_result": inspect_res}
         if not frames:
             return {
                 "ok": False,
@@ -509,7 +543,10 @@ class FigcraftTerminal:
                 "top_keys": debug.get("checked", []),
                 "engine_result": inspect_res,
             }
-        return {"ok": True, "count": len(frames), "frames": frames}
+        result = {"ok": True, "count": len(frames), "frames": frames}
+        if selected is not None:
+            result["page_index"] = selected
+        return result
 
     def export_frame(self, node_id: int, out_path: str, fmt: str = "png", scale: float = 1.0) -> Dict[str, Any]:
         """Select a frame and export it cleanly to disk."""
@@ -539,9 +576,10 @@ class FigcraftTerminal:
         }
 
     def export_all(self, out_dir: str, fmt: str = "png", scale: float = 1.0,
-                   prefix: str = "") -> Dict[str, Any]:
-        """Export every screen-level frame to <dir>/<slug>.<ext>; skip unnamed ones."""
-        frames_res = self.list_frames()
+                   prefix: str = "", page_index: Optional[int] = None,
+                   page_name: Optional[str] = None) -> Dict[str, Any]:
+        """Export frames of the selected page to <dir>/<slug>.<ext>."""
+        frames_res = self.list_frames(page_index=page_index, page_name=page_name)
         if not frames_res.get("ok"):
             return frames_res
         os.makedirs(os.path.abspath(out_dir), exist_ok=True)
@@ -560,7 +598,13 @@ class FigcraftTerminal:
             else:
                 skipped.append({"id": fr.get("id"), "name": name,
                                 "reason": res.get("engine_result", res)})
-        return {"ok": True, "count": len(exported), "exported": exported, "skipped": skipped}
+        result: Dict[str, Any] = {
+            "ok": True, "count": len(exported),
+            "exported": exported, "skipped": skipped,
+        }
+        if frames_res.get("page_index") is not None:
+            result["page_index"] = frames_res["page_index"]
+        return result
 
     def diff_node(self, node_id: Any) -> Dict[str, Any]:
         """Return a compact property summary of one node for mutation verification."""
@@ -726,7 +770,7 @@ REPL_HELP = (
     "  reload [--soft|--hard] [file]  Reload file (default --soft; uses the active file,\n"
     "                         fails non-zero if reload fails)\n"
     "  export <id> <path>     Export one node to image\n"
-    "  export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"]\n"
+    "  export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] [--page-index N | --page-name NAME]\n"
     "                         Export all frames to a directory\n"
     "  diff <id>              Show property summary of one node\n"
     "  exec <cmd> [json]      Execute an engine command\n"
@@ -739,11 +783,11 @@ REPL_HELP = (
 REPL_CMD_HELP: Dict[str, str] = {
     "status": "status — check socket health and active document. No arguments.",
     "inspect": "inspect — print raw document.inspect output. No arguments.",
-    "frames": "frames — list screen-level frames via document.inspect: id, name, x/y/w/h.",
+    "frames": "frames [--page-index N | --page-name NAME] — list frames on a page of pages[0..N]: id, name, x/y/w/h.",
     "open": "open <path> — open a .figcraft file in running FigCraft and make it the active file.",
     "reload": "reload [--soft|--hard] [file] — default --soft tries refresh without force-closing the tab, falls back to close+open with \"fallback\": true. Without a path it uses the file made active by start/open, and fails if no file is known or the reload fails. --hard always closes+opens.",
     "export": "export <id> <path> — export one node to an image file.",
-    "export-all": "export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] — export every frame to <dir>/<slug>.<ext>.",
+    "export-all": "export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] [--page-index N | --page-name NAME] — export frames of one page to <dir>/<slug>.<ext>.",
     "diff": "diff <id> — property summary (id, name, type, x/y/w/h, fill/stroke/text) for verifying mutations.",
     "exec": "exec <cmd> [json] — execute an engine command, e.g. exec file.save '{\"path\": \"out.figcraft\"}'.",
     "watch": "watch [file] -o <dir> [--debounce 0.5] [--format png] — poll mtime (active file by default), reload soft + export-all on change. A failed reload stops the watch without exporting. Ctrl-C stops.",
@@ -802,6 +846,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_frames = sub.add_parser("frames", help="List screen-level frames via document.inspect (id, name, x/y/w/h)")
     p_frames.add_argument("--json", action="store_true",
                           help="Output JSON (default output is already JSON; kept for compatibility)")
+    p_frames.add_argument("--page-index", type=int,
+                          help="List frames on this page index (default: 0)")
+    p_frames.add_argument("--page-name", help="List frames on this page name")
 
     # export-all
     p_ea = sub.add_parser("export-all", help="Export every screen-level frame to a directory")
@@ -810,6 +857,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="Image format (default: png)")
     p_ea.add_argument("--scale", type=float, default=1.0, help="Export scale (default: 1.0)")
     p_ea.add_argument("--prefix", default="", help="Filename prefix (default: empty)")
+    p_ea.add_argument("--page-index", type=int,
+                      help="Export frames on this page index (default: 0)")
+    p_ea.add_argument("--page-name", help="Export frames on this page name")
 
     # diff
     p_diff = sub.add_parser("diff", help="Show property summary of one node (verify mutations without raw inspect)")
@@ -889,12 +939,14 @@ def main():
         sys.exit(0 if res.get("ok") else 1)
 
     elif args.cmd == "frames":
-        res = term.list_frames()
+        res = term.list_frames(page_index=args.page_index, page_name=args.page_name)
         print(json.dumps(res, indent=2))
         sys.exit(0 if res.get("ok") else 1)
 
     elif args.cmd == "export-all":
-        res = term.export_all(args.out, fmt=args.format, scale=args.scale, prefix=args.prefix)
+        res = term.export_all(args.out, fmt=args.format, scale=args.scale,
+                              prefix=args.prefix, page_index=args.page_index,
+                              page_name=args.page_name)
         print(json.dumps(res, indent=2))
         sys.exit(0 if res.get("ok") else 1)
 
@@ -967,7 +1019,20 @@ def main():
             elif action == "inspect":
                 print(json.dumps(term.send_rpc("document.inspect"), indent=2))
             elif action == "frames":
-                print(json.dumps(term.list_frames(), indent=2))
+                rest = (" ".join(parts[1:])).split()
+                page_index, page_name = None, None
+                i = 0
+                while i < len(rest):
+                    if rest[i] == "--page-index" and i + 1 < len(rest):
+                        page_index = int(rest[i + 1])
+                        i += 2
+                    elif rest[i] == "--page-name" and i + 1 < len(rest):
+                        page_name = rest[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+                print(json.dumps(term.list_frames(page_index=page_index,
+                                                  page_name=page_name), indent=2))
             elif action == "open" and len(parts) > 1:
                 print(json.dumps(term.open_file(parts[1]), indent=2))
             elif action == "reload":
@@ -993,6 +1058,7 @@ def main():
                 rest = (" ".join(parts[1:])).split()
                 out_dir = rest[0]
                 fmt, scale, prefix = "png", 1.0, ""
+                page_index, page_name = None, None
                 i = 1
                 while i < len(rest):
                     if rest[i] == "--format" and i + 1 < len(rest):
@@ -1004,9 +1070,18 @@ def main():
                     elif rest[i] == "--prefix" and i + 1 < len(rest):
                         prefix = rest[i + 1]
                         i += 2
+                    elif rest[i] == "--page-index" and i + 1 < len(rest):
+                        page_index = int(rest[i + 1])
+                        i += 2
+                    elif rest[i] == "--page-name" and i + 1 < len(rest):
+                        page_name = rest[i + 1]
+                        i += 2
                     else:
                         i += 1
-                print(json.dumps(term.export_all(out_dir, fmt=fmt, scale=scale, prefix=prefix), indent=2))
+                print(json.dumps(term.export_all(out_dir, fmt=fmt, scale=scale,
+                                                 prefix=prefix,
+                                                 page_index=page_index,
+                                                 page_name=page_name), indent=2))
             elif action == "diff" and len(parts) > 1:
                 print(json.dumps(term.diff_node(parts[1]), indent=2))
             elif action == "exec" and len(parts) > 1:

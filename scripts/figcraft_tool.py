@@ -174,6 +174,56 @@ class FigcraftDocument:
         }
         self.file_path: Optional[str] = None
 
+    def page_ids(self) -> List[int]:
+        """Return every page id in document order (``pages[0..N]``)."""
+        return [int(pid) for pid in (self.doc.get("pages") or [])]
+
+    def resolve_page(self, page_index: Optional[int] = None,
+                     page_name: Optional[str] = None) -> int:
+        """Resolve a page by index or name; index 0 is the default."""
+        ids = self.page_ids()
+        if page_name is not None:
+            for pid in ids:
+                page = self.doc["nodes"].get(str(pid), {})
+                if isinstance(page, dict) and str(page.get("name")) == page_name:
+                    return pid
+            available = [str(self.doc["nodes"].get(str(pid), {}).get("name"))
+                         for pid in ids]
+            raise ValueError("page %r not found; available pages: %s"
+                             % (page_name, ", ".join(available)))
+        index = 0 if page_index is None else int(page_index)
+        if index < 0 or index >= len(ids):
+            raise ValueError("page_index %d is out of range for %d page(s)"
+                             % (index, len(ids)))
+        return ids[index]
+
+    def add_page(self, name: str, background: Optional[str] = None) -> int:
+        """Append a new page so multi-page documents can be built offline."""
+        existing = [str(self.doc["nodes"].get(str(pid), {}).get("name"))
+                    for pid in self.page_ids()]
+        if name in existing:
+            raise ValueError("page %r already exists" % name)
+        nid = self.alloc_id()
+        base = hex_to_rgba(background or TOKENS["colors"]["bg_app"])
+        self.doc["nodes"][str(nid)] = {
+            "id": nid,
+            "name": name,
+            "type": "page",
+            "background": base,
+            "children": [],
+            "flows": [],
+            "guides": [],
+            "prototype": {
+                "device": "None",
+                "background": base,
+                "rotation": "portrait",
+            },
+            "width": 0.0,
+            "height": 0.0,
+        }
+        self.doc.setdefault("pages", []).append(nid)
+        return nid
+
     @classmethod
     def load(cls, file_path: str) -> "FigcraftDocument":
         """Load an existing .figcraft file."""
@@ -189,7 +239,7 @@ class FigcraftDocument:
         return inst
 
     def resolve_layout(self):
-        """Recursively resolves two-pass AutoLayout for all pages and screens."""
+        """Resolve two-pass AutoLayout on every page, ``pages[0..N]``."""
         try:
             from build_artistic_flow import resolve_tree_layout
         except ImportError as exc:
@@ -213,13 +263,14 @@ class FigcraftDocument:
             print(f"figcraft_tool: resolve_layout failed ({e}) — saving without reflow.",
                   file=sys.stderr)
 
-        # Multi-page guard (SKILL §7.4): the live engine + export only
-        # load the pages[0] subtree; a second page is invisible even if valid.
-        if len(self.doc.get("pages", [1])) > 1:
-            print("figcraft_tool: multi-page document — the engine only loads "
-                  f"pages[0] {self.doc.get('pages')}. Move the diagram to "
-                  "a separate file if non-first pages do not render.",
-                  file=sys.stderr)
+        # All pages are reflowed above and saved verbatim below. The live canvas
+        # may display pages[0] by default, but no page is dropped here; use the
+        # page selector in the terminal/auditor to inspect later pages.
+        page_count = len(self.doc.get("pages") or [])
+        if page_count > 1:
+            print("figcraft_tool: multi-page document with %d pages; all pages "
+                  "were reflowed and preserved. The live canvas may show only "
+                  "pages[0] by default." % page_count, file=sys.stderr)
 
         path = output_path or self.file_path
         if not path:
@@ -313,6 +364,8 @@ class FigcraftDocument:
         x: Optional[float] = None,
         y: Optional[float] = None,
         overrides: Optional[Dict[str, Any]] = None,
+        page_index: Optional[int] = None,
+        page_name: Optional[str] = None,
     ) -> Optional[int]:
         """Duplicate a component subtree for component-first reuse.
 
@@ -322,12 +375,22 @@ class FigcraftDocument:
         properties (deep-copied so the source template is never mutated); the
         builder-only ``overrides`` key is never written into node JSON.
         A visited set and a hard ceiling keep the traversal bounded even if a
-        malformed document contains a parent cycle.
+        malformed document contains a parent cycle. ``page_index`` /
+        ``page_name`` select the destination page when no explicit parent is
+        given, so a component can be copied across ``pages[0..N]``.
         """
         root = self.doc["nodes"].get(str(node_id))
         if not isinstance(root, dict):
             return None
-        target_parent = parent_id if parent_id is not None else root.get("parent", 1)
+        if parent_id is not None:
+            explicit_parent = parent_id
+        elif page_index is not None or page_name is not None:
+            # An explicit target page moves the copy onto that page.
+            explicit_parent = self.resolve_page(page_index, page_name)
+        else:
+            explicit_parent = None
+        target_parent = (explicit_parent if explicit_parent is not None
+                         else root.get("parent", 1))
         clean_overrides = self._sanitize_node(overrides or {})
         if not isinstance(clean_overrides, dict):
             clean_overrides = {}
@@ -354,8 +417,8 @@ class FigcraftDocument:
             clone = self._sanitize_node(copy.deepcopy(source))
             clone["id"] = new_id
             if old_id == str(node_id):
-                if parent_id is not None:
-                    clone["parent"] = parent_id
+                if explicit_parent is not None:
+                    clone["parent"] = explicit_parent
                 if name is not None:
                     clone["name"] = name
                 if x is not None or y is not None:
@@ -411,14 +474,15 @@ class FigcraftDocument:
     def ensure_board(self, name: str, x: float = 0.0, y: float = 0.0,
                      width: Optional[float] = None, height: Optional[float] = None,
                      fill: Optional[str] = None, corner_radius: float = 0.0,
-                     clip: bool = True) -> int:
-        """Reuse an existing top-level board or create it once.
+                     clip: bool = True, page_index: Optional[int] = None,
+                     page_name: Optional[str] = None) -> int:
+        """Reuse an existing board on the selected page or create it once.
 
-        The engine loads ``pages[0]`` only, so boards are adjacent top-level
-        frames on that page. Repeated calls with the same name return the same
-        frame instead of rebuilding it (SKILL section 3-board standard).
+        The default target is ``pages[0]`` because the live canvas shows that
+        page first, but any page in ``pages[0..N]`` can be selected by index or
+        name. Repeated calls with the same name return the same frame.
         """
-        page_id = int((self.doc.get("pages") or [1])[0])
+        page_id = self.resolve_page(page_index, page_name)
         page = self.doc["nodes"].get(str(page_id), {})
         for child_id in page.get("children", []) or []:
             child = self.doc["nodes"].get(str(child_id))
@@ -437,14 +501,22 @@ class FigcraftDocument:
         name: str,
         parent_id: Optional[int] = None,
         builder: Optional[Callable[[], int]] = None,
+        page_index: Optional[int] = None,
+        page_name: Optional[str] = None,
     ) -> Optional[int]:
         """Return a named component, building it only when it is absent.
 
-        The bounded search is limited to ``parent_id``'s subtree when given.
-        An existing node is returned untouched so callers can duplicate it
-        with :meth:`duplicate_node` instead of rebuilding it from scratch.
+        With no parent or page selector the search covers every page, so reuse
+        works across ``pages[0..N]``. A parent scopes the search to its subtree;
+        ``page_index`` / ``page_name`` scope it to one page. An existing node
+        is returned untouched for :meth:`duplicate_node` to copy.
         """
-        roots = [parent_id] if parent_id is not None else list(self.doc.get("pages", [1]))
+        if parent_id is not None:
+            roots = [parent_id]
+        elif page_index is not None or page_name is not None:
+            roots = [self.resolve_page(page_index, page_name)]
+        else:
+            roots = self.page_ids()
         stack = [int(root) for root in roots]
         seen = set()
         while stack and len(seen) < MAX_SEARCH_NODES:  # cut-loop guard
@@ -1474,12 +1546,14 @@ class FigcraftClient:
 # ---------------------------------------------------------------------------
 # SCREEN BUILDERS (TEMPLATES MATCHING DESIGN.MD)
 # ---------------------------------------------------------------------------
-def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40.0) -> int:
-    """Build the complete Kuron Studio Desktop Workbench (1280x960)."""
+def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40.0,
+                           page_index: Optional[int] = None,
+                           page_name: Optional[str] = None) -> int:
+    """Build the complete Kuron Studio Desktop Workbench on the selected page."""
     # Main outer frame (Desktop 1280x960)
     screen_id = doc.create_frame(
         name="1. Workbench",
-        parent_id=1,
+        parent_id=doc.resolve_page(page_index, page_name),
         width=1280.0,
         height=960.0,
         x=x,
@@ -1623,11 +1697,13 @@ def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40
 
     return screen_id
 
-def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.0) -> int:
-    """Build the Design Tokens Living Style Guide Frame."""
+def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.0,
+                        page_index: Optional[int] = None,
+                        page_name: Optional[str] = None) -> int:
+    """Build the Design Tokens style guide on the selected page."""
     frame_id = doc.create_frame(
         name="03. Design Tokens & Patterns",
-        parent_id=1,
+        parent_id=doc.resolve_page(page_index, page_name),
         width=1280.0,
         height=960.0,
         x=x,
@@ -2009,18 +2085,22 @@ def component_first(doc: "FigcraftDocument", component_id: int, parent_id: int,
 def ensure_board(doc: "FigcraftDocument", name: str, x: float = 0.0, y: float = 0.0,
                  width: Optional[float] = None, height: Optional[float] = None,
                  fill: Optional[str] = None, corner_radius: float = 0.0,
-                 clip: bool = True) -> int:
-    """Reuse an existing ``pages[0]`` board or create it once."""
+                 clip: bool = True, page_index: Optional[int] = None,
+                 page_name: Optional[str] = None) -> int:
+    """Reuse an existing board on the selected page or create it once."""
     return doc.ensure_board(name, x=x, y=y, width=width, height=height,
-                            fill=fill, corner_radius=corner_radius, clip=clip)
+                            fill=fill, corner_radius=corner_radius, clip=clip,
+                            page_index=page_index, page_name=page_name)
 
 
 def find_or_reuse_component(
     doc: "FigcraftDocument", name: str, parent_id: Optional[int] = None,
     builder: Optional[Callable[[], int]] = None,
+    page_index: Optional[int] = None, page_name: Optional[str] = None,
 ) -> Optional[int]:
-    """Find a component for reuse; build it once only when it is absent."""
-    return doc.find_or_reuse_component(name, parent_id=parent_id, builder=builder)
+    """Find a component across ``pages[0..N]``; build it only when absent."""
+    return doc.find_or_reuse_component(name, parent_id=parent_id, builder=builder,
+                                       page_index=page_index, page_name=page_name)
 
 
 # ---------------------------------------------------------------------------
@@ -2190,6 +2270,8 @@ def main():
     p_add = file_sub.add_parser("add-screen", help="Add a screen frame to existing .figcraft file")
     p_add.add_argument("path", help="Path to .figcraft file")
     p_add.add_argument("--screen", choices=["workbench", "tokens"], required=True, help="Screen type")
+    p_add.add_argument("--page-index", type=int, help="Target page index (default: 0)")
+    p_add.add_argument("--page-name", help="Target page name (overrides index)")
 
     # Subcommand: live
     live_p = subparsers.add_parser("live", help="Live FigCraft.app automation via socket")
@@ -2276,9 +2358,9 @@ def main():
 
         elif args.file_action == "add-screen":
             doc = FigcraftDocument.load(args.path)
-            # Find max X to place screen to the right
+            # Find max X on the selected page to place the screen to the right.
             nodes = doc.doc.get("nodes", {})
-            page = nodes.get("1", {})
+            page = nodes.get(str(doc.resolve_page(args.page_index, args.page_name)), {})
             max_x = 40.0
             for cid in page.get("children", []):
                 cn = nodes.get(str(cid), {})
@@ -2290,9 +2372,13 @@ def main():
             new_x = max_x + 80.0
 
             if args.screen == "workbench":
-                build_workbench_screen(doc, x=new_x, y=40.0)
+                build_workbench_screen(doc, x=new_x, y=40.0,
+                                       page_index=args.page_index,
+                                       page_name=args.page_name)
             elif args.screen == "tokens":
-                build_tokens_screen(doc, x=new_x, y=40.0)
+                build_tokens_screen(doc, x=new_x, y=40.0,
+                                    page_index=args.page_index,
+                                    page_name=args.page_name)
             doc.save()
             print(f"Added {args.screen} screen at x={new_x} to {args.path}")
 

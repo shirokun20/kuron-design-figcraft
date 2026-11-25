@@ -25,8 +25,16 @@ One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
   than 1000px. Contrast ancestry, traversal, and layout checks are scoped to
   the board root, eliminating cross-board false positives; rule S-14 reports
   overlapping sibling boards.
-- **Tests:** added `test_three_boards.py` covering 3-board layout, smart
-  reuse with unique ids, and multi-board audit detection and cleanliness.
+- **Full multi-page support:** `ensure_board()`, `find_or_reuse_component()`,
+  `duplicate_node()`, the preset generator, the auditor, and the terminal now
+  accept `page_index` / `page_name` selectors and work across `pages[0..N]`.
+  Save/reflow preserves later pages; the auditor checks every page and can be
+  filtered by page; documentation describes the live canvas's page-0 default
+  honestly.
+- **Tests:** added `test_three_boards.py` and `test_multi_page.py` covering
+  3-board layout, smart reuse with unique ids, page selection and cross-page
+  duplication, save/reflow preservation of `pages[1..N]`, and multi-page audit
+  detection and cleanliness.
 - **Version lock:** `VERSION`, `SKILL.md` metadata, `HARNESS_VERSION`, and
   `tests/test_package_hygiene.py` all move to `3.2.0`.
 
