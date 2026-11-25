@@ -1,143 +1,159 @@
-# FigCraft Design Patterns & System Specification
+# FigCraft Design Patterns — A Dynamic Layout Grammar
 
-Portable design contract for `kuron-design-figcraft`. Every AI agent using this
-skill **must** follow this specification when creating or modifying designs.
-All values come from the bundled token file `design-tokens.css` (namespace
-`--ks-*`) plus `DESIGN.md` in this same `references/` directory. Those two files
-are the single source of truth; a consuming project may supply its own token
-file with the same names, but never invent a value outside the tokens.
+The technical specification for `kuron-design-figcraft`. **Not** a collection of
+one project's templates. Every colour, spacing, radius, type, and state value
+comes from the project's `DESIGN.md` (mandatory) and `design-tokens.css`
+(portable preset). If they conflict, `DESIGN.md` wins.
 
----
-
-## 1. Filosofi Desain
-
-- **Dense Desktop Workbench:** a compact productivity tool — tight rows, clear
-  groups, minimal empty decoration. Not a relaxed landing page.
-- **Single Source of Truth:** colours and sizes resolve to `--ks-*` tokens in
-  `references/design-tokens.css`. No value outside those tokens.
-- **Peran Warna Tegas:**
-  - **Coral (`#ff6b5a`):** primary action only (main CTA, active selection outline).
-  - **Cyan (`#35e7f5`):** technical information (coordinates `[x, y, w, h]`, IDs, counters).
-  - **Surface/Panel:** layered neutral darks (`#0d0d10` → `#141418` → `#1a1a20` → `#22222a`).
-  - **Inks:** hierarchical text (`#ececf1` primary, `#a5a6b0` secondary, `#71727d` muted).
-- **Auto-Layout Sentris:** every container, button, card, and panel **must** use
-  Auto-Layout (`mode: horizontal | vertical`) with measured padding and gap.
+Companion modules: `DESIGN.md` (contract), `token-architecture.md` (hierarchy),
+`style-directions.md` (direction), `dark-artifact-rules.md` (execution),
+`light-glass-system.md` (theme/surface), `product-designer-2026.md` (pillars).
 
 ---
 
-## 2. Palet Token Warna (dark default; pasangan light di `design-tokens.css`)
+## 1. Source of Values and Anti-Hardcode
 
-| Token | Dark Hex | Kegunaan |
+1. **Read `DESIGN.md` first.** Roles `action-primary`, `data-technical`, and
+   `status-*` map to project colours. Coral/cyan in the preset are not identity.
+2. **Use ladders, not magic numbers.** `semantic.space.*`, `semantic.radius.*`,
+   `semantic.type.*`, `component.*` from `DESIGN.md`.
+3. **Forbidden:** inventing hex values or "roughly right" margins/font sizes.
+4. **Forbidden:** treating one narrative flow (for example import → translate →
+   review) as the standard. That is an **example**; the project flow belongs in
+   `DESIGN.md`.
+5. **Auto-Layout centric.** Every container, button, card, and panel uses
+   `mode: horizontal | vertical` with measured padding/gap from tokens.
+
+---
+
+## 2. Layout Grammar (Universal Blocks)
+
+Combine blocks according to the direction in `DESIGN.md`. Blocks are neutral —
+density, size, and hierarchy are what change.
+
+| Block | When to use | Tokens that change its character |
 |---|---|---|
-| `--ks-bg` | `#0d0d10` | Kanvas terluar / background window terdalam |
-| `--ks-surface` | `#141418` | Latar utama halaman kerja |
-| `--ks-surface-2` | `#1a1a20` | Header, folder bar, toolbar, rail navigasi |
-| `--ks-raised` | `#22222a` | Kartu daftar, dialog modal Level 3 |
-| `--ks-hover` | `#2a2a33` | State hover tombol / baris tabel |
-| `--ks-line` | `#26262e` | Garis pembatas panel 1px hairline monokrom |
-| `--ks-line-strong` | `#35353f` | Kontur jendela luar, border dialog modal |
-| `--ks-text` | `#ececf1` | Judul, label aktif, teks utama |
-| `--ks-text-2` | `#a5a6b0` | Teks tubuh, metadata, label form |
-| `--ks-text-3` | `#71727d` | Placeholder, shortcut, teks non-aktif |
-| `--ks-accent` | `#ff6b5a` | **Aksi utama saja** (CTA), outline seleksi aktif |
-| `--ks-accent-hover` | `#ff8272` | Hover tombol aksi utama |
-| `--ks-accent-fg` | `#1a0a08` | Teks di atas latar coral |
-| `--ks-accent-soft` | `#2e1614` | Soft tint coral untuk latar tombol/badge |
-| `--ks-cyan` | `#35e7f5` | Info teknis mono — **Dilarang neon `#00e5ff`** |
-| `--ks-cyan-soft` | `#0e2a2e` | Soft tint cyan lembut tanpa border |
-| `--ks-success` | `#5fd99a` | Status selesai / online |
-| `--ks-success-soft` | `#10281d` | Latar badge selesai |
-| `--ks-warn` | `#ffc15e` | Status proses berjalan / review |
-| `--ks-warn-soft` | `#2b2110` | Latar badge berjalan |
-| `--ks-danger` | `#ff5c5c` | Aksi destruktif / error |
-| `--ks-danger-soft` | `#2e1416` | Latar badge error |
-| `--ks-info` | `#6ba6ff` | Status info netral |
-| `--ks-info-soft` | `#111e33` | Latar badge info |
-| `--ks-ring` | `#9a9aa8` | Cincin fokus + halo seleksi (bukan dekorasi) |
-| `--ks-selected` | `#34343f` | Baris terpilih persisten, beda dari `--ks-hover` |
+| `shell` | screen/frame wrapper | `radius.window`, `bg`, `clip: true` |
+| `chrome` | window bar / toolbar / breadcrumb | `space.xs`, `type.caption`, `surface-2` |
+| `rail` | secondary navigation, list, filters | rail width, `line`, `hover`/`selected` |
+| `canvas` | main working area | `bg`, `surface`, `measure` (editorial) |
+| `inspector` | contextual detail/properties | `surface-2`, `raised`, `space.sm` |
+| `toolbar` | grouped actions + status | `component.button.height`, `gap` |
+| `stack` / `cluster` | vertical stack / horizontal cluster | `space.xxs…xl` |
+| `grid` / `bento` | module cards, summaries | `radius.card`, `space.lg`, `raised` |
+| `table` | dense data, ledger, log | `line`, `hover`, `selected`, `type.mono` |
+| `article` | reading, documentation | `type.body`, `measure`, `space.md` |
+| `form` | setup, wizard, input | `component.field.height`, focus `ring` |
+| `dialog` / `sheet` | confirmation, quick detail | `radius.card`, elevation 3, scrim |
+| `empty` / `skeleton` / `error` | mandatory states | see §5 |
 
-> **Aturan Border Bersih (Quiet Workbench):**
-> 1. Dilarang border neon (`#00e5ff` atau cyan menyala). Cyan yang benar `#35e7f5`.
-> 2. Badge & chip **tanpa border**, duduk lembut di atas `--ks-*-soft`.
-> 3. Pembatas struktural memakai hairline monokrom (`--ks-line` / `--ks-line-strong`).
-> 4. Tanpa gradient, shadow dekoratif, atau emoji sebagai ikon; angka memakai
->    `tabular-nums`; fokus keyboard selalu terlihat; hormati `prefers-reduced-motion`.
+**Example (not a standard)** — a three-column workbench:
 
-Lihat `light-glass-system.md` untuk nilai light dan token kaca.
+```text
+chrome (32px preset)
+rail (196px preset) │ canvas (1fr) │ inspector (268px preset)
+```
+
+These numbers are **presets only**. A `bento_modular` project may use an
+asymmetric grid; `editorial` may use one measured column; `clean_utility` may use
+a single focused form.
 
 ---
 
-## 3. Tipografi & Font
+## 3. Rhythm and Geometry
 
-| Peran | Font Family | Style | Ukuran | Kegunaan |
-|---|---|---|---|---|
-| Brand / Title | `Space Grotesk` (atau `Inter`) | Bold | 20 pt | Nama aplikasi, judul layar |
-| Heading | `Inter` | Bold | 15 pt | Judul seksi, judul kartu |
-| Body (default) | `Inter` | Medium | 13 pt | Teks UI, instruksi |
-| Button Label | `Inter` | SemiBold | 12 pt | Label tombol aksi |
-| Caption / Meta | `Inter` | Regular | 11 pt | Deskripsi sekunder |
-| Mono / Counter | `JetBrains Mono` | SemiBold | 10–11 pt | Angka tabular, koordinat, pill |
+- Spacing rhythm uses the `semantic.space` **ladder** (preset 4/8/12/16/20/24).
+  Do not insert numbers between rungs.
+- Radius uses `control / card / window / pill` from `DESIGN.md`.
+- Typography has three sweeps: `display`/`heading` → `body` → `mono` +
+  `tabular-nums`.
+- Elevation is **at most 3 levels** (`component.elevation.maxLevels`); needing a
+  fourth usually means the focus ring is what is needed, not another shadow.
+- `clip: true` is mandatory on screen-level frames.
+- Canvas utilisation ≥60%; more than 150px of dead vertical space at the bottom
+  means redistribute.
 
-Font di-bundel offline (fontsource), bukan CDN.
-
----
-
-## 4. Skala Ukuran & Radius (Strict Geometry)
-
-| Elemen | Tinggi | Radius | Padding | Layout |
-|---|---|---|---|---|
-| Button sm | 28 px | 6 px | `pad_x:10`, `pad_y:4` | horizontal, gap 6 |
-| Button md (default) | 32 px | 6 px | `pad_x:14`, `pad_y:6` | horizontal, gap 6 |
-| Button lg | 40 px | 6 px | `pad_x:18`, `pad_y:10` | horizontal, gap 8 |
-| Input / Field | 36 px | 6 px | `pad_x:12`, `pad_y:6` | horizontal, gap 8 |
-| Badge / Pill | 20 px | 9999 px | `pad_x:8`, `pad_y:2` | horizontal, mono 10 pt |
-| Card | Hug | 12 px | `pad_x:14`, `pad_y:12` | vertical, border 1px |
-| Window Frame | 960 px | 16 px | — | root screen frame |
-| Window Bar | 32 px | — | `pad_x:16` | traffic lights + judul + status |
-| Pipeline Bar | 40 px | — | `pad_x:20` | 5 tahap dengan arrow `→` |
-| Touch target | ≥44 px | — | — | mobile / tablet |
+Responsiveness comes from `DESIGN.md`/project presets (390 / 834 / 1280 are
+example breakpoints). Touch targets must be ≥ `a11y.minTouchTargetPx`.
 
 ---
 
-## 5. Pola Layout Layar Standar
+## 4. Node Naming and Structure
 
-### Desktop Workbench (1280 × 960)
-1. **WindowBar (32px):** traffic lights 12px, judul dokumen, status dot.
-2. **PipelineBar (40px):** 5 tahap (Import → Deteksi → Terjemah → Review → Ekspor).
-3. **Body (888px):** 3 kolom — **Left Rail 196px** (daftar item + counter),
-   **Center Canvas 1fr** (latar `--ks-bg`), **Right Inspector 268px** (kartu detil:
-   asli / hasil / fit bar + footer aksi).
-
-### Dashboard Proyek (1280 × 960)
-Grid kartu lebar 300px: cover, judul Space Grotesk, counter mono, progress bar
-3px, badge mode.
-
-### Ritme Makro Kanvas (S-06)
-Margin horizontal 40–80px; konten simetris. Ruang mati vertikal bawah >150px =
-tolak — distribusikan ulang atau pusatkan (`main_align: center/spaceBetween`).
-Utilisasi kanvas ≥60%.
-
-### Tablet (834 × 1194)
-Rail ikon 64px + grid 3 kolom + bottom sheet 40% (grab handle aksen cyan).
-
-### Mobile (390 × 844)
-Grid 2 kolom + tab bar bawah 56px (touch target minimal 44px).
+1. Semantic names: `Chrome`, `Rail_<Role>`, `Canvas`, `Inspector`,
+   `Btn_<Action>`, `Card_<Name>`, `Badge_<Type>`, `Empty_<Scope>`.
+2. Auto-Layout sizing: main container `sizing_h: "fill"`; sidebar/inspector
+   `sizing_h: "fixed"`, `sizing_v: "fill"`; button/badge `sizing_h: "hug"`,
+   `sizing_v: "fixed"`; text `hug`/`hug`.
+3. **Match nodes by `name`, not ID** — numeric IDs shift between saves.
+4. Build base components first; create new screens with **Duplicate → Refine**,
+   not by assembling raw nodes per screen (`product-designer-2026.md`).
+5. Node order follows a sensible reading order for screen readers.
 
 ---
 
-## 6. Aturan Penamaan & Struktur Node
+## 5. Mandatory States (no "hollow" screens)
 
-1. Nama node semantik: `WindowBar`, `TrafficLights`, `PipelineBar`,
-   `LeftRail`, `CenterCanvas`, `RightInspector`, `Btn_<Action>`,
-   `Card_<Name>`, `Badge_<Type>`.
-2. Sizing Auto-Layout: container utama `sizing_h: "fill"`; sidebar/inspector
-   `sizing_h: "fixed"`, `sizing_v: "fill"`; tombol/badge `sizing_h: "hug"`,
-   `sizing_v: "fixed"`; teks `hug`/`hug`.
-3. Selalu sertakan `clip: true` pada frame level layar untuk memotong sudut
-   melengkung 16px.
-4. **Samakan node by `name`, bukan ID** — ID numerik bisa bergeser antar save.
-5. **Component-first:** bangun komponen dasar dulu (input, form, button, icon,
-   card/list item) dengan variant jelas. Hierarki token:
-   `primitive → semantic → component → theme/state`. Untuk layar baru,
-   **duplicate** node komponen yang sudah ada lalu **refine** — jangan merakit
-   ulang dari nol. Lihat `product-designer-2026.md`.
+Every entry in `DESIGN.md`'s `states` must have a real design. Preset minimum:
+`default`, `hover`, `focus`, `disabled`, `empty`, `loading`, `error`, `success`.
+
+| State | Treatment |
+|---|---|
+| `default` | normal view / base surface; clear three-sweep hierarchy |
+| `hover` | temporary `hover` token; gone when the pointer leaves |
+| `focus` | `ring` 2px, offset 2px; always visible |
+| `disabled` | `opacity: 0.45`, never a new colour; action blocked immediately |
+| `empty` | heading + description + **action**; no illustration |
+| `loading` | ≤1s disable controls; >1s spinner; >3s staged progress labels |
+| `error` | cause + way out; inline and persistent when it must be read/retried |
+| `success` | concise confirmation; no unfounded claims |
+
+Three list states **must differ**: hover / keyboard cursor / persistent selection.
+
+---
+
+## 6. Concise Microcopy (details in `product-designer-2026.md`)
+
+- Buttons: **action + object** — `Save changes`, not `OK`.
+- Helpers: explain the expected format.
+- Errors: **cause + way out**, including toasts.
+- Empty state: offer an action.
+- Shortcuts follow the real platform (⌘/⇧ on macOS, Ctrl+/Shift+ elsewhere).
+- Text follows `locale` + `copy_tone` in `DESIGN.md`, not the skill's language.
+
+---
+
+## 6.1 Visual Regression Guard (mandatory, not optional)
+
+| Rule | How to preserve it |
+|---|---|
+| Text must not escape its border/frame | `width`/`sizing` from tokens; verify in the PNG; never truncate text |
+| Text must not clip or overlap | one line = one node; reserve room with `width`, not `min-width` |
+| Screen frames must set `clip: true` | check every frame before export; keep content in bounds |
+| Auto-Layout must stay consistent | `mode`, `padding`, `gap`, `fill/fixed/hug` follow `semantic.space` + `component.*`; no "almost equal" numbers |
+| Duplicates must not lose styling | copy fill/stroke/radius/padding from the parent, then `refine`; `diff --id` parent vs duplicate |
+| JSON must match the PNG | evidence is the opened PNG; when in doubt, `reload` + export again |
+
+These six defects are the same **visual regression guard** as in
+`dark-artifact-rules.md` and `live-editing-workflow.md`. Passing lint alone is
+not enough.
+
+---
+
+## 7. "Do Not Hardcode" List
+
+| Forbidden | Use instead |
+|---|---|
+| `#ff6b5a`, `#0d0d10`, neon `#00e5ff` | `action-primary`, `bg`, `data-technical` |
+| Free `28/32/40px` | `component.button.height` |
+| `gap: 7px` | `semantic.space` ladder |
+| A specific project's title/labels | `locale` + `copy_tone` + `DESIGN.md` prose |
+| `Import→Detect→…` as the standard | The project's screen map in `DESIGN.md` |
+| "Glass is always required" | `style_direction` (editorial/utility may skip glass) |
+
+---
+
+## 8. One-Line Summary
+
+`DESIGN.md → direction → universal layout blocks → semantic tokens → components
+(duplicate → refine) → complete states → 3–5x PNG proof`.

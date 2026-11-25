@@ -1,472 +1,726 @@
 #!/usr/bin/env python3
-"""
-FigCraft QuickDesign Engine — rapid UI generator (kuron-design-figcraft 3.0.0)
-Enables AI agents and designers to generate token-compliant, high-fidelity
-UI designs in seconds from natural prompts or declarative specs, complete with
-automatic PNG visual preview rendering.
+"""FigCraft QuickDesign — token-driven rapid UI generator (3.1.0).
 
-Setiap dokumen yang dihasilkan dicek validator quiet-workbench
-(figcraft_tool.lint_design); peringatan dicetak ke stderr tanpa
-menggagalkan build. Port preview default (9880) disatukan dengan
-agent_terminal.DEFAULT_PORT / FigcraftClient agar satu FigCraft
-yang berjalan bisa dipakai semua perkakas.
+Every colour, font size, spacing step, component size, and microcopy string is
+resolved from the project's ``DESIGN.md`` through ``design_manifest.py``. The
+``--generate`` flag builds Components, Screen, or Form nodes for Live Generate
+sessions, and the layout is driven by ``style_direction``.
+
+All network operations use timeouts; the preview worker is always terminated.
 """
 
-import sys
-import os
-import json
-import subprocess
-import time
 import argparse
-from typing import Dict, List, Optional, Any, Union
+import os
+import subprocess
+import sys
+import time
+from typing import Any, Dict, List, Optional
 
-# Import base toolkit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from figcraft_tool import FigcraftDocument, FigcraftClient, TOKENS, hex_to_rgba, lint_design
+
+import figcraft_tool as ft  # noqa: E402
+from design_manifest import STYLE_DIRECTIONS, DesignManifestError  # noqa: E402
+from figcraft_tool import (  # noqa: E402
+    COMPONENT,
+    CONTENT,
+    DESIGN_DOC,
+    FONTS,
+    GEOMETRY,
+    SPACE,
+    TYPE,
+    TOKENS,
+    FigcraftClient,
+    FigcraftDocument,
+    get_tokens,
+    lint_design,
+)
+
+STYLE = DESIGN_DOC["style_direction"]
+LOCALE = DESIGN_DOC["locale"]
+COPY_TONE = DESIGN_DOC["copy_tone"]
+SCREEN = GEOMETRY.get("screen", {})
+SCREEN_W = float(SCREEN.get("width", 1280))
+SCREEN_H = float(SCREEN.get("height", 960))
+BLOCKS = GEOMETRY.get("blocks", {})
+COPY = DESIGN_DOC.get("copy", {}).get(LOCALE, {})
+
+
+def text(key: str) -> str:
+    """Return project microcopy; fall back to a neutral title-cased key."""
+    value = COPY.get(key)
+    return value if value else key.replace("_", " ").title()
+
+
+def use_theme(theme: Optional[str]) -> None:
+    """Rebind the shared builder tokens for an explicit theme override."""
+    global TOKENS, FONTS, CONTENT
+    chosen = theme or DESIGN_DOC.get("default_theme", "dark")
+    ft.TOKENS = get_tokens(chosen)
+    TOKENS = ft.TOKENS
+    FONTS = TOKENS["typography"]
+    CONTENT = TOKENS["content"]
+
+
+STYLE_LEVERS: Dict[str, Dict[str, Any]] = {
+    "dense_operational": {"gap": SPACE["xs"], "pad": SPACE["sm"], "columns": 3,
+                          "rail": True, "inspector": True, "elevation": 2},
+    "bento_modular": {"gap": SPACE["lg"], "pad": SPACE["md"], "columns": 2,
+                      "rail": False, "inspector": False, "elevation": 3},
+    "editorial": {"gap": SPACE["xl"], "pad": SPACE["lg"], "columns": 1,
+                  "rail": False, "inspector": False, "elevation": 1},
+    "clean_utility": {"gap": SPACE["md"], "pad": SPACE["md"], "columns": 1,
+                      "rail": False, "inspector": False, "elevation": 1},
+    "custom": {"gap": SPACE["md"], "pad": SPACE["md"], "columns": 2,
+               "rail": False, "inspector": False, "elevation": 2},
+}
+
+
+def levers(style: Optional[str] = None) -> Dict[str, Any]:
+    """Return token-derived layout levers for a style direction."""
+    chosen = style or STYLE
+    if chosen not in STYLE_LEVERS:
+        raise DesignManifestError(
+            "Unknown style direction %r. Expected one of %s."
+            % (chosen, ", ".join(sorted(STYLE_DIRECTIONS)))
+        )
+    return STYLE_LEVERS[chosen]
+
 
 # ---------------------------------------------------------------------------
 # RAPID BLOCK COMPONENT FACTORY
 # ---------------------------------------------------------------------------
 class DesignBlocks:
-    """Reusable high-level design blocks conforming strictly to Kuron Studio DESIGN.md."""
+    """Reusable blocks built only from DESIGN.md tokens and project copy."""
 
     @staticmethod
-    def add_app_header(
-        doc: FigcraftDocument,
-        parent_id: int,
-        title: str = "Kuron Studio",
-        chapter: str = "ONIMASA Ch. 12",
-        page_info: str = "41 pages",
-        actions: Optional[List[Dict[str, str]]] = None
-    ) -> int:
-        """Top Application Toolbar with brand, breadcrumbs, search, and action buttons."""
+    def add_app_header(doc: FigcraftDocument, parent_id: int,
+                       title: Optional[str] = None, chapter: Optional[str] = None,
+                       page_info: Optional[str] = None,
+                       actions: Optional[List[Dict[str, str]]] = None) -> int:
+        """Top toolbar: brand, context, and a single primary action."""
         header_id = doc.create_frame(
-            name="AppHeader",
-            parent_id=parent_id,
-            width=1280.0,
-            height=TOKENS["sizes"]["header"],
-            fill=TOKENS["colors"]["surface_2"],
-            stroke=TOKENS["colors"]["border"],
-            layout_mode="horizontal",
-            gap=16.0,
-            padding=(0.0, 20.0, 0.0, 20.0),
-            main_align="spaceBetween",
-            cross_align="center",
-            sizing_h="fill",
-            sizing_v="fixed"
+            "AppHeader", parent_id, SCREEN_W, TOKENS["sizes"]["header"],
+            fill=TOKENS["colors"]["surface-2"], stroke=TOKENS["colors"]["line"],
+            layout_mode="horizontal", gap=SPACE["md"],
+            padding=(0.0, SPACE["lg"], 0.0, SPACE["lg"]),
+            main_align="spaceBetween", cross_align="center",
+            sizing_h="fill", sizing_v="fixed",
         )
+        left = doc.create_frame("BrandGroup", header_id, SPACE["xl"] * 10,
+                                TOKENS["sizes"]["header"], layout_mode="horizontal",
+                                gap=SPACE["sm"], cross_align="center",
+                                sizing_h="hug", sizing_v="fixed")
+        doc.create_rect("AppLogo", left, SPACE["lg"], SPACE["lg"],
+                        fill=TOKENS["colors"]["text"], corner_radius=FONTS["sizes"]["badge"])
+        doc.create_text("AppName", title or text("app_name"), left,
+                        font_size=TYPE["body"], font_weight="Bold",
+                        font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
+        doc.create_text("Sep", "—", left, font_size=TYPE["control"],
+                        color=TOKENS["colors"]["text-2"])
+        doc.create_text("Context", chapter or text("project_dashboard"), left,
+                        font_size=TYPE["control"], font_weight="Medium",
+                        color=TOKENS["colors"]["text-2"])
+        doc.build_badge("BadgePages", (page_info or text("project_dashboard")).upper(),
+                        left, tone="data-technical")
 
-        # Left: Brand + Breadcrumbs
-        left_grp = doc.create_frame("BrandGroup", header_id, width=320.0, height=32.0, layout_mode="horizontal", gap=12.0, cross_align="center", sizing_h="hug", sizing_v="fixed")
-        # Brand logo badge — ink_primary (Design C); penanda aktif = ring/box
-        # luar, BUKAN warna logo. Coral di sini = aksen ganda.
-        doc.create_rect("AppLogo", left_grp, 24.0, 24.0, fill=TOKENS["colors"]["ink_primary"], corner_radius=6.0)
-        doc.create_text("AppName", title, left_grp, font_size=13.0, font_weight="Bold", font_family=TOKENS["typography"]["font_brand"], color=TOKENS["colors"]["ink_primary"])
-        doc.create_text("Sep", "—", left_grp, font_size=12.0, color=TOKENS["colors"]["ink_muted"])
-        doc.create_text("ChapName", chapter, left_grp, font_size=12.0, font_weight="Medium", color=TOKENS["colors"]["ink_secondary"])
-        doc.build_badge("BadgePages", page_info.upper(), left_grp, tone="cyan")
-
-        # Right: Actions
-        right_grp = doc.create_frame("HeaderActions", header_id, width=300.0, height=32.0, layout_mode="horizontal", gap=10.0, cross_align="center", sizing_h="hug", sizing_v="fixed")
+        right = doc.create_frame("HeaderActions", header_id, SPACE["xl"] * 10,
+                                 TOKENS["sizes"]["header"], layout_mode="horizontal",
+                                 gap=SPACE["sm"], cross_align="center",
+                                 sizing_h="hug", sizing_v="fixed")
         if actions:
-            for act in actions:
+            for action in actions:
                 doc.build_button(
-                    name=f"Btn_{act.get('label', 'Action')}",
-                    label=act.get("label", "Button"),
-                    parent_id=right_grp,
-                    variant=act.get("variant", "default"),
-                    size=act.get("size", "md"),
-                    icon_name=act.get("icon")
+                    name="Btn_" + action.get("key", "action"),
+                    label=text(action.get("key", "action")),
+                    parent_id=right,
+                    variant=action.get("variant", "default"),
+                    size=action.get("size", "md"),
+                    icon_name=action.get("icon"),
                 )
         else:
-            doc.build_button("BtnDetect", "Deteksi Balon", right_grp, variant="default", size="md")
-            doc.build_button("BtnTranslate", "Terjemahkan Semua", right_grp, variant="primary", size="md")
-
+            doc.build_button("BtnDetect", text("detect_bubbles"), right,
+                             variant="default", size="md")
+            doc.build_button("BtnTranslate", text("translate_all"), right,
+                             variant="primary", size="md")
         return header_id
 
     @staticmethod
-    def add_stats_grid(
-        doc: FigcraftDocument,
-        parent_id: int,
-        stats: List[Dict[str, Any]]
-    ) -> int:
-        """Horizontal row of dense metric cards."""
+    def add_stats_grid(doc: FigcraftDocument, parent_id: int,
+                       stats: List[Dict[str, Any]]) -> int:
+        """Dense metric row; card geometry comes from the manifest."""
+        card = BLOCKS.get("statCard", {})
         row_id = doc.create_frame(
-            name="StatsRow",
-            parent_id=parent_id,
-            width=1280.0,
-            height=84.0,
-            layout_mode="horizontal",
-            gap=16.0,
-            sizing_h="fill",
-            sizing_v="hug"
+            "StatsRow", parent_id, SCREEN_W, card.get("height", SPACE["xl"] * 4),
+            layout_mode="horizontal", gap=SPACE["md"],
+            sizing_h="fill", sizing_v="hug",
         )
         for stat in stats:
-            card = doc.create_frame(
-                name=f"StatCard_{stat.get('label', '')}",
-                parent_id=row_id,
-                width=240.0,
-                height=84.0,
-                fill=TOKENS["colors"]["surface_card"],
-                stroke=TOKENS["colors"]["border"],
-                corner_radius=TOKENS["radii"]["card"],
-                layout_mode="vertical",
-                gap=6.0,
-                padding=(12.0, 16.0, 12.0, 16.0),
-                sizing_h="fill",
-                sizing_v="fixed"
+            card_id = doc.create_frame(
+                "StatCard_" + str(stat.get("key", "item")), row_id,
+                card.get("width", SPACE["xl"] * 10), card.get("height", SPACE["xl"] * 4),
+                fill=TOKENS["colors"]["raised"], stroke=TOKENS["colors"]["line"],
+                corner_radius=tokr("card"), layout_mode="vertical", gap=SPACE["xs"],
+                padding=(SPACE["sm"], SPACE["md"], SPACE["sm"], SPACE["md"]),
+                sizing_h="fill", sizing_v="fixed",
             )
-            top_line = doc.create_frame("TopLine", card, width=200.0, height=16.0, layout_mode="horizontal", main_align="spaceBetween", cross_align="center", sizing_h="fill", sizing_v="hug")
-            doc.create_text("Label", stat.get("label", "").upper(), top_line, font_size=10.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"])
-            if "badge" in stat:
-                doc.build_badge("Badge", stat["badge"], top_line, tone=stat.get("tone", "cyan"))
-
-            bot_line = doc.create_frame("BottomLine", card, width=200.0, height=28.0, layout_mode="horizontal", gap=8.0, cross_align="baseline", sizing_h="fill", sizing_v="hug")
-            doc.create_text("Value", str(stat.get("value", "")), bot_line, font_size=20.0, font_weight="Bold", font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_primary"])
+            top = doc.create_frame("TopLine", card_id, SPACE["xl"] * 8, TYPE["body"],
+                                   layout_mode="horizontal", main_align="spaceBetween",
+                                   cross_align="center", sizing_h="fill", sizing_v="hug")
+            doc.create_text("Label", text(stat.get("key", "item")).upper(), top,
+                            font_size=TYPE["caption"], font_weight="Bold",
+                            color=TOKENS["colors"]["text-3"])
+            if "tone" in stat:
+                doc.build_badge("Badge", text(stat.get("badge", "status")), top,
+                                tone=stat["tone"])
+            bottom = doc.create_frame("BottomLine", card_id, SPACE["xl"] * 8,
+                                      SPACE["xl"], layout_mode="horizontal",
+                                      gap=SPACE["sm"], cross_align="baseline",
+                                      sizing_h="fill", sizing_v="hug")
+            doc.create_text("Value", str(stat.get("value", "")), bottom,
+                            font_size=TYPE["display"], font_weight="Bold",
+                            font_family=FONTS["font_mono"], color=TOKENS["colors"]["text"])
             if "desc" in stat:
-                doc.create_text("Desc", stat["desc"], bot_line, font_size=11.0, color=TOKENS["colors"]["ink_secondary"])
-
+                doc.create_text("Desc", stat["desc"], bottom, font_size=TYPE["caption"],
+                                color=TOKENS["colors"]["text-2"])
         return row_id
 
     @staticmethod
-    def add_project_cards_grid(
-        doc: FigcraftDocument,
-        parent_id: int,
-        projects: List[Dict[str, Any]]
-    ) -> int:
-        """Grid of Manga Project cards (300px each) for Dashboard."""
+    def add_project_cards_grid(doc: FigcraftDocument, parent_id: int,
+                               projects: List[Dict[str, Any]]) -> int:
+        """Project card grid with component-first progress bars."""
+        card_spec = BLOCKS.get("projectCard", {})
         grid_id = doc.create_frame(
-            name="ProjectsGrid",
-            parent_id=parent_id,
-            width=1280.0,
-            height=400.0,
-            layout_mode="horizontal",
-            gap=20.0,
-            sizing_h="fill",
-            sizing_v="hug"
+            "ProjectsGrid", parent_id, SCREEN_W,
+            card_spec.get("height", SPACE["xl"] * 12),
+            layout_mode="horizontal", gap=BLOCKS.get("screenGap", SPACE["lg"]),
+            sizing_h="fill", sizing_v="hug",
         )
-        for proj in projects:
+        for project in projects:
             card = doc.create_frame(
-                name=f"Project_{proj.get('title', 'Card')}",
-                parent_id=grid_id,
-                width=300.0,
-                height=340.0,
-                fill=TOKENS["colors"]["surface_card"],
-                stroke=TOKENS["colors"]["coral"] if proj.get("active") else TOKENS["colors"]["border"],
-                stroke_width=1.5 if proj.get("active") else 1.0,
-                corner_radius=TOKENS["radii"]["card"],
-                layout_mode="vertical",
-                gap=12.0,
-                padding=(14.0, 14.0, 14.0, 14.0),
-                sizing_h="fixed",
-                sizing_v="fixed"
+                "Project_" + str(project.get("key", "card")), grid_id,
+                card_spec.get("width", SPACE["xl"] * 10),
+                card_spec.get("height", SPACE["xl"] * 12),
+                fill=TOKENS["colors"]["raised"],
+                stroke=TOKENS["colors"]["action-primary"] if project.get("active")
+                else TOKENS["colors"]["line"],
+                stroke_width=1.5 if project.get("active") else 1.0,
+                corner_radius=tokr("card"), layout_mode="vertical", gap=SPACE["sm"],
+                padding=(SPACE["sm"], SPACE["sm"], SPACE["sm"], SPACE["sm"]),
+                sizing_h="fixed", sizing_v="fixed",
             )
-            # Manga Cover Thumbnail with mode badge overlay
-            cover = doc.create_frame("CoverBox", card, 272.0, 180.0, fill=TOKENS["colors"]["surface_active"], corner_radius=8.0, layout_mode="vertical", main_align="spaceBetween", padding=(8.0, 8.0, 8.0, 8.0), sizing_h="fill", sizing_v="fixed")
-            tag_row = doc.create_frame("TagRow", cover, 256.0, 22.0, layout_mode="horizontal", main_align="spaceBetween", sizing_h="fill", sizing_v="hug")
-            doc.build_badge("ModeBadge", proj.get("mode", "JA → ID"), tag_row, tone="coral" if proj.get("active") else "cyan")
-            doc.build_badge("StatusBadge", proj.get("status", "Review"), tag_row, tone="ok" if proj.get("done") else "warn")
-            
-            # Comic art placeholder icon
-            doc.create_text("CoverText", "MANGA COVER", cover, font_size=12.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"])
+            cover = doc.create_frame(
+                "CoverBox", card, card_spec.get("width", 300) - SPACE["md"] * 2,
+                card_spec.get("coverHeight", SPACE["xl"] * 8),
+                fill=TOKENS["colors"]["hover"], corner_radius=FONTS["sizes"]["badge"],
+                layout_mode="vertical", main_align="spaceBetween",
+                padding=(SPACE["sm"], SPACE["sm"], SPACE["sm"], SPACE["sm"]),
+                sizing_h="fill", sizing_v="fixed",
+            )
+            tag_row = doc.create_frame("TagRow", cover, SPACE["xl"] * 10, TYPE["body"],
+                                       layout_mode="horizontal",
+                                       main_align="spaceBetween", sizing_h="fill",
+                                       sizing_v="hug")
+            doc.build_badge("ModeBadge", text(project.get("mode", "status")), tag_row,
+                            tone="action-primary" if project.get("active") else "data-technical")
+            doc.build_badge("StatusBadge", text(project.get("status", "status")), tag_row,
+                            tone="status-success" if project.get("done") else "status-warn")
+            doc.create_text("CoverText", text("new_project"), cover,
+                            font_size=TYPE["body"], font_weight="Bold",
+                            color=TOKENS["colors"]["text-3"])
 
-            # Project Info
-            info = doc.create_frame("InfoBlock", card, 272.0, 80.0, layout_mode="vertical", gap=4.0, sizing_h="fill", sizing_v="hug")
-            doc.create_text("Title", proj.get("title", "Project Title"), info, font_size=14.0, font_weight="Bold", font_family=TOKENS["typography"]["font_brand"], color=TOKENS["colors"]["ink_primary"])
-            doc.create_text("Meta", f"{proj.get('pages', 24)} halaman  •  {proj.get('bubbles', 180)} balon kata", info, font_size=11.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["cyan"])
+            info = doc.create_frame("InfoBlock", card, SPACE["xl"] * 10, SPACE["xl"] * 4,
+                                    layout_mode="vertical", gap=SPACE["xs"],
+                                    sizing_h="fill", sizing_v="hug")
+            doc.create_text("Title", text(project.get("key", "card")), info,
+                            font_size=TYPE["heading"], font_weight="Bold",
+                            font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
+            doc.create_text("Meta", "%s · %s" % (project.get("pages", 0),
+                                                 project.get("bubbles", 0)),
+                            info, font_size=TYPE["caption"],
+                            font_family=FONTS["font_mono"],
+                            color=TOKENS["colors"]["data-technical"])
 
-            # Progress Bar (3px height)
-            pct = proj.get("progress", 50)
-            bar_bg = doc.create_frame("ProgressBar", card, 272.0, 6.0, fill=TOKENS["colors"]["surface_2"], corner_radius=3.0, sizing_h="fill", sizing_v="fixed")
-            doc.create_rect("ProgressFill", bar_bg, 272.0 * (pct / 100.0), 6.0, fill=TOKENS["colors"]["coral"] if pct == 100 else TOKENS["colors"]["cyan"], corner_radius=3.0)
-
-            # Footer
-            ftr = doc.create_frame("CardFooter", card, 272.0, 24.0, layout_mode="horizontal", main_align="spaceBetween", cross_align="center", sizing_h="fill", sizing_v="hug")
-            doc.create_text("ProgressText", f"{pct}% Selesai", ftr, font_size=10.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_secondary"])
-            doc.create_text("Updated", proj.get("updated", "Baru saja"), ftr, font_size=10.0, color=TOKENS["colors"]["ink_muted"])
-
+            pct = float(project.get("progress", 0))
+            bar = doc.create_frame("ProgressBar", card, SPACE["xl"] * 10,
+                                   SPACE["xs"], fill=TOKENS["colors"]["surface-2"],
+                                   corner_radius=SPACE["xs"] / 2.0,
+                                   sizing_h="fill", sizing_v="fixed")
+            doc.create_rect("ProgressFill", bar, SPACE["xl"] * 10 * (pct / 100.0),
+                            SPACE["xs"],
+                            fill=TOKENS["colors"]["action-primary" if pct >= 100
+                                                  else "data-technical"],
+                            corner_radius=SPACE["xs"] / 2.0)
+            footer = doc.create_frame("CardFooter", card, SPACE["xl"] * 10, TYPE["body"],
+                                      layout_mode="horizontal",
+                                      main_align="spaceBetween", cross_align="center",
+                                      sizing_h="fill", sizing_v="hug")
+            doc.create_text("ProgressText", "%s%%" % pct, footer,
+                            font_size=TYPE["caption"], font_family=FONTS["font_mono"],
+                            color=TOKENS["colors"]["text-2"])
+            doc.create_text("Updated", text("status"), footer,
+                            font_size=TYPE["caption"], color=TOKENS["colors"]["text-3"])
         return grid_id
 
     @staticmethod
-    def add_ledger_table(
-        doc: FigcraftDocument,
-        parent_id: int,
-        rows_data: List[Dict[str, Any]]
-    ) -> int:
-        """Dense Ledger / Data Table for translation review."""
-        table_container = doc.create_frame(
-            name="LedgerTable",
-            parent_id=parent_id,
-            width=1280.0,
-            height=500.0,
-            fill=TOKENS["colors"]["surface_card"],
-            stroke=TOKENS["colors"]["border"],
-            corner_radius=TOKENS["radii"]["card"],
-            layout_mode="vertical",
-            gap=0.0,
-            clip=True,
-            sizing_h="fill",
-            sizing_v="hug"
+    def add_ledger_table(doc: FigcraftDocument, parent_id: int,
+                         rows_data: List[Dict[str, Any]]) -> int:
+        """Dense ledger table built from cell frames (no overlapping columns)."""
+        spec = BLOCKS.get("ledger", {})
+        table = doc.create_frame(
+            "LedgerTable", parent_id, SCREEN_W, spec.get("height", SPACE["xl"] * 20),
+            fill=TOKENS["colors"]["raised"], stroke=TOKENS["colors"]["line"],
+            corner_radius=tokr("card"), layout_mode="vertical", gap=0.0,
+            clip=True, sizing_h="fill", sizing_v="hug",
         )
-        # Header Row
-        head_row = doc.create_frame("TableHeader", table_container, width=1280.0, height=36.0, fill=TOKENS["colors"]["surface_2"], stroke=TOKENS["colors"]["border"], layout_mode="horizontal", padding=(0.0, 16.0, 0.0, 16.0), cross_align="center", sizing_h="fill", sizing_v="fixed")
-        doc.create_text("H_Idx", "#", head_row, font_size=11.0, font_weight="Bold", font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_muted"], width=40.0)
-        doc.create_text("H_Page", "HLM", head_row, font_size=11.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"], width=60.0)
-        doc.create_text("H_Orig", "TEKS ASLI (JA)", head_row, font_size=11.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"], width=300.0)
-        doc.create_text("H_Trans", "TERJEMAHAN (ID)", head_row, font_size=11.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"], width=380.0)
-        doc.create_text("H_Fit", "FIT", head_row, font_size=11.0, font_weight="Bold", font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_muted"], width=80.0)
-        doc.create_text("H_Status", "STATUS", head_row, font_size=11.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"], width=120.0)
+        head = doc.create_frame("TableHeader", table, SCREEN_W,
+                                spec.get("header", SPACE["xl"] * 2),
+                                fill=TOKENS["colors"]["surface-2"],
+                                stroke=TOKENS["colors"]["line"],
+                                layout_mode="horizontal",
+                                padding=(0.0, SPACE["md"], 0.0, SPACE["md"]),
+                                cross_align="center", sizing_h="fill", sizing_v="fixed")
+        for key, width in (("index", SPACE["xl"]), ("page", SPACE["xl"] * 2),
+                           ("original", SPACE["xl"] * 12), ("result", SPACE["xl"] * 15),
+                           ("fit", SPACE["xl"] * 3), ("status", SPACE["xl"] * 5)):
+            doc.create_text("H_" + key, text(key).upper(), head,
+                            font_size=TYPE["caption"], font_weight="Bold",
+                            color=TOKENS["colors"]["text-3"], width=width, max_w=width)
 
-        # Rows
-        for i, row in enumerate(rows_data):
-            is_even = (i % 2 == 1)
+        for index, row in enumerate(rows_data):
             row_frame = doc.create_frame(
-                name=f"Row_{i+1}",
-                parent_id=table_container,
-                width=1280.0,
-                height=44.0,
-                fill=TOKENS["colors"]["surface_active"] if is_even else TOKENS["colors"]["surface_card"],
-                stroke=TOKENS["colors"]["border_subtle"],
-                layout_mode="horizontal",
-                padding=(0.0, 16.0, 0.0, 16.0),
-                cross_align="center",
-                sizing_h="fill",
-                sizing_v="fixed"
+                "Row_%02d" % (index + 1), table, SCREEN_W,
+                spec.get("row", SPACE["xl"] * 2),
+                fill=TOKENS["colors"]["hover"] if index % 2 else TOKENS["colors"]["raised"],
+                stroke=TOKENS["colors"]["line"], layout_mode="horizontal",
+                padding=(0.0, SPACE["md"], 0.0, SPACE["md"]),
+                cross_align="center", sizing_h="fill", sizing_v="fixed",
             )
-            doc.create_text("Idx", f"{i+1:02d}", row_frame, font_size=11.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_muted"], width=40.0)
-            doc.create_text("Page", f"P.{row.get('page', 1):02d}", row_frame, font_size=11.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["cyan"], width=60.0)
-            doc.create_text("Orig", row.get("orig", "—"), row_frame, font_size=12.0, color=TOKENS["colors"]["ink_secondary"], width=300.0)
-            doc.create_text("Trans", row.get("trans", "—"), row_frame, font_size=12.0, font_weight="SemiBold", color=TOKENS["colors"]["ink_primary"], width=380.0)
-            doc.create_text("Fit", f"{row.get('fit', 95)}%", row_frame, font_size=11.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["success"], width=80.0)
-            status_tone = "ok" if row.get("status") == "Dicek" else ("warn" if row.get("status") == "Perlu Cek" else "cyan")
-            doc.build_badge("Status", row.get("status", "Selesai"), row_frame, tone=status_tone)
-
-        return table_container
+            doc.create_text("Idx", "%02d" % (index + 1), row_frame,
+                            font_size=TYPE["caption"], font_family=FONTS["font_mono"],
+                            color=TOKENS["colors"]["text-3"],
+                            width=SPACE["xl"], max_w=SPACE["xl"])
+            doc.create_text("Page", "P.%02d" % row.get("page", 1), row_frame,
+                            font_size=TYPE["caption"], font_family=FONTS["font_mono"],
+                            color=TOKENS["colors"]["data-technical"],
+                            width=SPACE["xl"] * 2, max_w=SPACE["xl"] * 2)
+            doc.create_text("Orig", row.get("original", "—"), row_frame,
+                            font_size=TYPE["body"], color=TOKENS["colors"]["text-2"],
+                            width=SPACE["xl"] * 12, max_w=SPACE["xl"] * 12)
+            doc.create_text("Trans", row.get("result", "—"), row_frame,
+                            font_size=TYPE["body"], font_weight="SemiBold",
+                            color=TOKENS["colors"]["text"],
+                            width=SPACE["xl"] * 15, max_w=SPACE["xl"] * 15)
+            doc.create_text("Fit", "%s%%" % row.get("fit", 95), row_frame,
+                            font_size=TYPE["caption"], font_family=FONTS["font_mono"],
+                            color=TOKENS["colors"]["status-success"],
+                            width=SPACE["xl"] * 3, max_w=SPACE["xl"] * 3)
+            doc.build_badge("Status", text(row.get("status", "status")), row_frame,
+                            tone="status-success" if row.get("done") else "status-warn")
+        return table
 
     @staticmethod
-    def add_mobile_drawer_sheet(
-        doc: FigcraftDocument,
-        parent_id: int,
-        title: str = "Pengaturan & Tindakan Cepat",
-        items: Optional[List[Dict[str, str]]] = None
-    ) -> int:
-        """Bottom sheet / mobile drawer component (Issue #14 spec)."""
+    def add_mobile_drawer_sheet(doc: FigcraftDocument, parent_id: int,
+                                title: Optional[str] = None,
+                                items: Optional[List[Dict[str, str]]] = None) -> int:
+        """Bottom drawer composed from the same field/button components."""
+        spec = BLOCKS.get("drawer", {})
         sheet = doc.create_frame(
-            name="MobileDrawerSheet",
-            parent_id=parent_id,
-            width=390.0,
-            height=460.0,
-            fill=TOKENS["colors"]["surface_2"],
-            stroke=TOKENS["colors"]["border"],
-            corner_radius=20.0,
-            layout_mode="vertical",
-            gap=16.0,
-            padding=(12.0, 20.0, 24.0, 20.0),
-            sizing_h="fixed",
-            sizing_v="hug"
+            "MobileDrawerSheet", parent_id, spec.get("width", SPACE["xl"] * 14),
+            spec.get("height", SPACE["xl"] * 18),
+            fill=TOKENS["colors"]["surface-2"], stroke=TOKENS["colors"]["line"],
+            corner_radius=tokr("window"), layout_mode="vertical", gap=SPACE["sm"],
+            padding=(SPACE["sm"], SPACE["lg"], SPACE["lg"], SPACE["lg"]),
+            sizing_h="fixed", sizing_v="hug",
         )
-        # Grab Handle
-        doc.create_rect("GrabHandle", sheet, 40.0, 4.0, fill=TOKENS["colors"]["cyan"], corner_radius=2.0)
-        
-        # Header Title Row
-        head = doc.create_frame("DrawerHeader", sheet, 350.0, 28.0, layout_mode="horizontal", main_align="spaceBetween", cross_align="center", sizing_h="fill", sizing_v="hug")
-        doc.create_text("DrawerTitle", title, head, font_size=15.0, font_weight="Bold", font_family=TOKENS["typography"]["font_brand"], color=TOKENS["colors"]["ink_primary"])
-        doc.build_badge("BadgeMbl", "MOBILE", head, tone="coral")
-
-        # Action items list
-        menu_items = items or [
-            {"label": "Deteksi Ulang Semua Halaman", "desc": "Jalankan model YOLO11n-seg", "cta": "Deteksi", "tone": "default"},
-            {"label": "Pilih Penyedia AI (Provider)", "desc": "DeepSeek / Gemini 1.5 Flash", "cta": "Ubah", "tone": "default"},
-            {"label": "Bersihkan Balon Kosong (Inpaint)", "desc": "Hapus sisa teks Jepang otomatis", "cta": "Jalankan", "tone": "default"},
-            {"label": "Ekspor Chapter Selesai (.cbz / .zip)", "desc": "41 halaman terjemahan siap baca", "cta": "Ekspor", "tone": "primary"},
-        ]
-        for it in menu_items:
-            item_frame = doc.create_frame(
-                name=f"Item_{it['label'][:10]}",
-                parent_id=sheet,
-                width=350.0,
-                height=56.0,
-                fill=TOKENS["colors"]["surface_card"],
-                stroke=TOKENS["colors"]["border_subtle"],
-                corner_radius=TOKENS["radii"]["control"],
-                layout_mode="horizontal",
-                padding=(8.0, 12.0, 8.0, 12.0),
-                main_align="spaceBetween",
-                cross_align="center",
-                sizing_h="fill",
-                sizing_v="fixed"
+        doc.create_rect("GrabHandle", sheet, SPACE["xl"] * 2, SPACE["xs"],
+                        fill=TOKENS["colors"]["data-technical"],
+                        corner_radius=SPACE["xs"] / 2.0)
+        head = doc.create_frame("DrawerHeader", sheet, SPACE["xl"] * 14, TYPE["display"],
+                                layout_mode="horizontal", main_align="spaceBetween",
+                                cross_align="center", sizing_h="fill", sizing_v="hug")
+        doc.create_text("DrawerTitle", title or text("quick_settings"), head,
+                        font_size=TYPE["heading"], font_weight="Bold",
+                        font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
+        doc.build_badge("BadgeMbl", text("mobile"), head, tone="action-primary")
+        for item in items or []:
+            frame = doc.create_frame(
+                "Item_" + str(item.get("key", "action")), sheet,
+                SPACE["xl"] * 14, spec.get("item", SPACE["xl"] * 3),
+                fill=TOKENS["colors"]["raised"], stroke=TOKENS["colors"]["line"],
+                corner_radius=tokr("control"), layout_mode="horizontal",
+                padding=(SPACE["sm"], SPACE["md"], SPACE["sm"], SPACE["md"]),
+                main_align="spaceBetween", cross_align="center",
+                sizing_h="fill", sizing_v="fixed",
             )
-            text_col = doc.create_frame("TextCol", item_frame, 240.0, 40.0, layout_mode="vertical", gap=2.0, sizing_h="fill", sizing_v="hug")
-            doc.create_text("Label", it["label"], text_col, font_size=12.0, font_weight="SemiBold", color=TOKENS["colors"]["ink_primary"])
-            doc.create_text("Desc", it["desc"], text_col, font_size=10.0, color=TOKENS["colors"]["ink_muted"])
-            doc.build_button("CTA", it["cta"], item_frame, variant=it.get("tone", "default"), size="sm")
-
+            doc.create_text("Label", text(item.get("key", "action")), frame,
+                            font_size=TYPE["body"], font_weight="SemiBold",
+                            color=TOKENS["colors"]["text"])
+            doc.build_button("CTA", text(item.get("cta", "submit")), frame,
+                             variant=item.get("variant", "default"), size="sm")
         return sheet
 
 
+def tokr(role_or_scale: str) -> float:
+    """Resolve a radius token by semantic role or primitive scale name."""
+    if role_or_scale in TOKENS["radii"]:
+        return TOKENS["radii"][role_or_scale]
+    radii = DESIGN_DOC["tokens"]["primitive"]["radius"]
+    return radii.get(role_or_scale, radii["xs"])
+
+
 # ---------------------------------------------------------------------------
-# HIGH-LEVEL PRESET GENERATORS
+# LIVE GENERATE — Components / Screen / Form, driven by style_direction
 # ---------------------------------------------------------------------------
-def generate_preset(preset_name: str, doc_name: str = "Kuron QuickDesign") -> FigcraftDocument:
-    doc = FigcraftDocument(doc_name)
+def generate_components(doc: FigcraftDocument, parent_id: int = 1,
+                        style: Optional[str] = None) -> int:
+    """Build a component library by duplicating base components (refine, not rebuild)."""
+    lever = levers(style)
+    root = doc.create_frame(
+        "Components", parent_id, SCREEN_W, SCREEN_H,
+        fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
+        layout_mode="vertical", gap=lever["gap"],
+        padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
+        clip=True, sizing_h="fill", sizing_v="fill",
+    )
+    doc.create_text("LibraryTitle", text("components"), root,
+                    font_size=TYPE["display"], font_weight="Bold",
+                    font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
 
-    if preset_name == "dashboard":
-        # Screen: 1280x960 Dashboard
-        screen = doc.create_frame("Dashboard Screen", 1, 1280.0, 960.0, fill=TOKENS["colors"]["surface"], corner_radius=TOKENS["radii"]["window"], layout_mode="vertical", gap=20.0, padding=(0.0, 0.0, 32.0, 0.0), clip=True)
-        doc.build_window_bar(screen, "Kuron Studio — Proyek Manga & Webtoon")
-        DesignBlocks.add_app_header(doc, screen, title="Kuron Studio", chapter="Dashboard Proyek", page_info="8 Proyek Aktif")
+    row = doc.create_frame("ButtonVariants", root, SCREEN_W - SPACE["xl"] * 2,
+                           TOKENS["sizes"]["btn_lg"] + SPACE["md"],
+                           layout_mode="horizontal", gap=lever["gap"],
+                           cross_align="center", sizing_h="fill", sizing_v="hug")
+    base = doc.build_button("BtnBase", text("submit"), row, variant="primary", size="md")
+    doc.component_first(base, row, name="BtnSecondary",
+                        overrides={"fills": ft.make_solid_fill(TOKENS["colors"]["surface-2"])})
+    doc.component_first(base, row, name="BtnGhost",
+                        overrides={"fills": []})
+    doc.build_badge("BadgeTechnical", "ID 42", row, tone="data-technical")
+    doc.build_badge("BadgePrimary", text("status"), row, tone="action-primary")
+    doc.build_badge("BadgeSuccess", text("status"), row, tone="status-success")
+    doc.prevent_clipping(root)
+    return root
 
-        content = doc.create_frame("ContentArea", screen, 1280.0, 800.0, layout_mode="vertical", gap=20.0, padding=(0.0, 32.0, 0.0, 32.0), sizing_h="fill", sizing_v="fill")
-        # Stats summary row
-        stats = [
-            {"label": "Total Bab Dikerjakan", "value": "128", "desc": "+12 minggu ini", "badge": "AKTIF", "tone": "cyan"},
-            {"label": "Balon Kata Terdeteksi", "value": "3,420", "desc": "Akurasi 98.4%", "badge": "YOLO11", "tone": "cyan"},
-            {"label": "Waktu Rata-rata / Bab", "value": "4.2m", "desc": "3x lebih cepat", "badge": "CEPAT", "tone": "ok"},
-            {"label": "Siap Diekspor", "value": "6", "desc": "Tinggal verifikasi akhir", "badge": "CORAL CTA", "tone": "coral"},
-        ]
-        DesignBlocks.add_stats_grid(doc, content, stats)
 
-        # Projects cards
-        doc.create_text("SecTitle", "PROYEK BERJALAN", content, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["coral"])
-        projects = [
-            {"title": "ONIMASA: Demon Hunter", "pages": 41, "bubbles": 218, "mode": "JA → ID", "status": "Review", "progress": 82, "active": True, "updated": "2 menit lalu"},
-            {"title": "Kagurabachi: Katana Soul", "pages": 28, "bubbles": 142, "mode": "JA → ID", "status": "Translating", "progress": 45, "active": False, "updated": "1 jam lalu"},
-            {"title": "Chainsaw Atelier", "pages": 34, "bubbles": 190, "mode": "JA → ID", "status": "Selesai", "progress": 100, "done": True, "active": False, "updated": "Kemarin"},
-            {"title": "Frieren: Beyond Journey", "pages": 22, "bubbles": 98, "mode": "JA → EN", "status": "Deteksi", "progress": 15, "active": False, "updated": "3 hari lalu"},
-        ]
-        DesignBlocks.add_project_cards_grid(doc, content, projects)
+def generate_form(doc: FigcraftDocument, parent_id: int = 1,
+                  style: Optional[str] = None, fields: Optional[List[str]] = None,
+                  width: Optional[float] = None, height: Optional[float] = None) -> int:
+    """Build a form from component.field / component.button tokens."""
+    lever = levers(style)
+    form_w = width or SCREEN_W
+    form_h = height or SCREEN_H
+    root = doc.create_frame(
+        "Form", parent_id, form_w, form_h,
+        fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
+        layout_mode="vertical", gap=lever["gap"],
+        padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
+        clip=True, sizing_h="fill", sizing_v="fill",
+    )
+    doc.create_text("FormTitle", text("submit"), root,
+                    font_size=TYPE["display"], font_weight="Bold",
+                    color=TOKENS["colors"]["text"])
+    for key in fields or ["field_name", "field_email", "field_notes"]:
+        field = doc.create_frame(
+            "Field_" + key, root, max(SPACE["xl"] * 4, form_w - SPACE["xl"] * 2),
+            COMPONENT["field"]["height"], fill=TOKENS["colors"]["surface-2"],
+            stroke=TOKENS["colors"]["line"], corner_radius=tokr("control"),
+            layout_mode="horizontal", cross_align="center",
+            padding=(0.0, SPACE["sm"], 0.0, SPACE["sm"]),
+            sizing_h="fill", sizing_v="fixed",
+        )
+        doc.create_text("Label", text(key), field, font_size=TYPE["body"],
+                        color=TOKENS["colors"]["text-2"])
+    actions = doc.create_frame("FormActions", root,
+                               max(SPACE["xl"] * 4, form_w - SPACE["xl"] * 2),
+                               TOKENS["sizes"]["btn_md"] + SPACE["sm"],
+                               layout_mode="horizontal", gap=lever["gap"],
+                               main_align="max", cross_align="center",
+                               sizing_h="fill", sizing_v="hug")
+    doc.build_button("BtnCancel", text("cancel"), actions, variant="ghost", size="md")
+    doc.build_button("BtnSubmit", text("submit"), actions, variant="primary", size="md")
+    doc.prevent_clipping(root)
+    return root
 
-    elif preset_name == "ledger":
-        # Screen: 1280x960 Translation Review Ledger
-        screen = doc.create_frame("Ledger Screen", 1, 1280.0, 960.0, fill=TOKENS["colors"]["surface"], corner_radius=TOKENS["radii"]["window"], layout_mode="vertical", gap=20.0, padding=(0.0, 0.0, 32.0, 0.0), clip=True)
-        doc.build_window_bar(screen, "Kuron Studio — Tabel Terjemahan Balon Kata")
-        DesignBlocks.add_app_header(doc, screen, title="Kuron Studio", chapter="Ledger Review: ONIMASA Ch. 12", page_info="14 Balon Hlm. 04")
-        
-        content = doc.create_frame("ContentArea", screen, 1280.0, 800.0, layout_mode="vertical", gap=16.0, padding=(0.0, 32.0, 0.0, 32.0), sizing_h="fill", sizing_v="fill")
-        # Filters toolbar
-        ft_bar = doc.create_frame("FilterBar", content, 1216.0, 36.0, layout_mode="horizontal", main_align="spaceBetween", cross_align="center", sizing_h="fill", sizing_v="hug")
-        search_box = doc.create_frame("SearchBox", ft_bar, 300.0, 36.0, fill=TOKENS["colors"]["surface_card"], stroke=TOKENS["colors"]["border"], corner_radius=6.0, layout_mode="horizontal", padding=(0.0, 12.0, 0.0, 12.0), cross_align="center", sizing_h="hug", sizing_v="fixed")
-        doc.create_text("SearchTxt", "Cari teks asli atau hasil terjemahan...", search_box, font_size=11.0, color=TOKENS["colors"]["ink_muted"])
-        
-        btn_grp = doc.create_frame("BtnGrp", ft_bar, 200.0, 36.0, layout_mode="horizontal", gap=8.0, sizing_h="hug", sizing_v="fixed")
-        doc.build_button("BtnFilter", "Filter: Belum Dicek (4)", btn_grp, variant="default", size="sm")
-        doc.build_button("BtnApprove", "Setujui Semua Halaman", btn_grp, variant="default", size="sm")
 
-        # Table rows
-        rows = [
-            {"page": 4, "orig": "なに？！本当にあいつが…", "trans": "Apa?! Apa benar dia yang…", "fit": 94, "status": "Dicek"},
-            {"page": 4, "orig": "嘘じゃない。この目で見た。", "trans": "Bukan bohong. Aku melihatnya sendiri.", "fit": 98, "status": "Dicek"},
-            {"page": 4, "orig": "なら…急がねばなるまい！", "trans": "Kalau begitu… kita harus bergegas!", "fit": 88, "status": "Perlu Cek"},
-            {"page": 4, "orig": "結界が破られたら終わりだ。", "trans": "Jika penghalang hancur, habislah kita.", "fit": 96, "status": "Dicek"},
-            {"page": 4, "orig": "おい、お前も来い！", "trans": "Hei, kamu juga ikut!", "fit": 92, "status": "Dicek"},
-            {"page": 5, "orig": "待ってくれ！まだ準備が…", "trans": "Tunggu sebentar! Aku belum siap…", "fit": 90, "status": "Draft"},
-        ]
-        DesignBlocks.add_ledger_table(doc, content, rows)
+def generate_screen(doc: FigcraftDocument, x: float = 0.0, y: float = 0.0,
+                    style: Optional[str] = None, name: Optional[str] = None) -> int:
+    """Build one screen whose topology follows the selected style direction."""
+    lever = levers(style)
+    screen_id = doc.create_frame(
+        name or text("screen"), 1, SCREEN_W, SCREEN_H, x=x, y=y,
+        fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
+        layout_mode="vertical", gap=0.0, clip=True,
+    )
+    DesignBlocks.add_app_header(doc, screen_id)
 
-    elif preset_name == "drawer":
-        # Screen: Mobile 390x844 with active Bottom Drawer Sheet (Issue #14)
-        screen = doc.create_frame("Mobile Screen with Drawer", 1, 390.0, 844.0, fill="#00000088", corner_radius=32.0, layout_mode="vertical", main_align="max", clip=True)
-        # Background dimmed app
-        DesignBlocks.add_mobile_drawer_sheet(doc, screen)
+    body = doc.create_frame("Body", screen_id, SCREEN_W, SCREEN_H - TOKENS["sizes"]["header"],
+                            layout_mode="horizontal", gap=0.0,
+                            sizing_h="fill", sizing_v="fill")
+    if lever["rail"]:
+        rail = doc.create_frame("Rail", body, BLOCKS.get("railWidth", SPACE["xl"] * 8),
+                                SCREEN_H - TOKENS["sizes"]["header"],
+                                fill=TOKENS["colors"]["surface-2"],
+                                stroke=TOKENS["colors"]["line"],
+                                layout_mode="vertical", gap=lever["gap"],
+                                padding=(SPACE["sm"], SPACE["sm"], SPACE["sm"], SPACE["sm"]),
+                                sizing_h="fixed", sizing_v="fill")
+        for index in range(lever["columns"]):
+            doc.create_text("RailItem_%d" % index, "%s %d" % (text("page"), index + 1),
+                            rail, font_size=TYPE["caption"],
+                            color=TOKENS["colors"]["text-2"])
+    if lever["inspector"]:
+        inspector = doc.create_frame("Inspector", body,
+                                     BLOCKS.get("inspectorWidth", SPACE["xl"] * 12),
+                                     SCREEN_H - TOKENS["sizes"]["header"],
+                                     fill=TOKENS["colors"]["surface-2"],
+                                     stroke=TOKENS["colors"]["line"],
+                                     layout_mode="vertical", gap=lever["gap"],
+                                     padding=(SPACE["sm"], SPACE["sm"], SPACE["sm"], SPACE["sm"]),
+                                     sizing_h="fixed", sizing_v="fill")
+        doc.create_text("InspectorTitle", text("status"), inspector,
+                        font_size=TYPE["heading"], font_weight="Bold",
+                        color=TOKENS["colors"]["text"])
 
+    rail_w = BLOCKS.get("railWidth", SPACE["xl"] * 8) if lever["rail"] else 0
+    inspector_w = BLOCKS.get("inspectorWidth", SPACE["xl"] * 12) if lever["inspector"] else 0
+    canvas_w = SCREEN_W - rail_w - inspector_w
+    canvas = doc.create_frame("Canvas", body, canvas_w,
+                              SCREEN_H - TOKENS["sizes"]["header"],
+                              fill=TOKENS["colors"]["bg"],
+                              layout_mode="vertical", gap=lever["gap"],
+                              padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
+                              sizing_h="fill", sizing_v="fill")
+    if style in ("clean_utility", "custom"):
+        generate_form(doc, canvas, style=style,
+                      width=canvas_w - lever["pad"] * 2,
+                      height=SCREEN_H - TOKENS["sizes"]["header"] - lever["pad"] * 2)
+    elif style == "editorial":
+        doc.create_text("ArticleTitle", text("screen"), canvas,
+                        font_size=TYPE["display"], font_weight="Bold",
+                        font_family=FONTS["font_brand"], color=TOKENS["colors"]["text"])
+        doc.create_text("ArticleBody", text("empty_desc"), canvas,
+                        font_size=TYPE["body"], color=TOKENS["colors"]["text-2"],
+                        width=SCREEN_W / 2.0, max_w=SCREEN_W / 2.0)
     else:
-        # Default: Desktop Workbench
-        from figcraft_tool import build_workbench_screen
-        build_workbench_screen(doc, x=40.0, y=40.0)
+        grid = doc.create_frame("Cards", canvas,
+                                max(SPACE["xl"] * 4, canvas_w - lever["pad"] * 2),
+                                SCREEN_H / 2.0, layout_mode="horizontal",
+                                gap=lever["gap"], sizing_h="fill", sizing_v="hug")
+        for index in range(lever["columns"]):
+            card_w = max(SPACE["xl"] * 4,
+                         (canvas_w - lever["pad"] * 2 - lever["gap"]
+                          * (lever["columns"] - 1)) / lever["columns"])
+            card = doc.create_frame("Card_%d" % index, grid, card_w,
+                                    SCREEN_H / 3.0,
+                                    fill=TOKENS["colors"]["raised"],
+                                    stroke=TOKENS["colors"]["line"],
+                                    corner_radius=tokr("card"),
+                                    layout_mode="vertical", gap=lever["gap"],
+                                    padding=(lever["pad"], lever["pad"], lever["pad"], lever["pad"]),
+                                    sizing_h="fill", sizing_v="fixed")
+            doc.create_text("CardTitle", text("card"), card,
+                            font_size=TYPE["heading"], font_weight="Bold",
+                            color=TOKENS["colors"]["text"])
+            doc.create_text("CardBody", text("empty_desc"), card,
+                            font_size=TYPE["caption"], color=TOKENS["colors"]["text-2"],
+                            width=max(SPACE["xl"] * 2, card_w - lever["pad"] * 2),
+                            max_w=max(SPACE["xl"] * 2, card_w - lever["pad"] * 2))
+    doc.prevent_clipping(screen_id)
+    return screen_id
 
+
+def generate_live(kind: str, doc_name: str, style: Optional[str] = None,
+                  theme: Optional[str] = None) -> FigcraftDocument:
+    """Create a document containing one Live Generate artifact."""
+    use_theme(theme)
+    doc = FigcraftDocument(doc_name)
+    if kind == "components":
+        generate_components(doc, style=style)
+    elif kind == "form":
+        generate_form(doc, style=style)
+    elif kind == "screen":
+        generate_screen(doc, style=style)
+    else:
+        raise DesignManifestError("Unknown Live Generate kind %r." % kind)
     return doc
 
 
 # ---------------------------------------------------------------------------
-# MAIN CLI & AUTO-RENDER PREVIEW
+# PRESET GENERATORS
 # ---------------------------------------------------------------------------
-def main():
-    parser = argparse.ArgumentParser(
-        description="FigCraft QuickDesign: Viral rapid UI generator with instant PNG previews"
-    )
-    parser.add_argument("prompt", nargs="?", default="", help="Natural language prompt describing what to design")
-    parser.add_argument("-p", "--preset", choices=["workbench", "dashboard", "ledger", "drawer"], default="workbench", help="Template preset")
-    parser.add_argument("-o", "--output", required=True, help="Output .figcraft file path")
-    parser.add_argument("--preview", action="store_true", help="Automatically render PNG preview using FigCraft headless engine")
-    parser.add_argument("--port", type=int, default=9880, help="Port for automated render worker (default 9880, sama dengan agent_terminal/FigcraftClient agar satu FigCraft bisa dipakai bersama)")
+def generate_preset(preset_name: str, doc_name: str = "QuickDesign") -> FigcraftDocument:
+    """Generate a complete preset document from tokens."""
+    doc = FigcraftDocument(doc_name)
+    if preset_name == "dashboard":
+        screen = doc.create_frame(text("project_dashboard"), 1, SCREEN_W, SCREEN_H,
+                                  fill=TOKENS["colors"]["surface"],
+                                  corner_radius=tokr("window"), layout_mode="vertical",
+                                  gap=BLOCKS.get("screenGap", SPACE["lg"]),
+                                  padding=(0.0, 0.0, SPACE["lg"], 0.0), clip=True)
+        doc.build_window_bar(screen, title=text("app_name"))
+        DesignBlocks.add_app_header(doc, screen, page_info=text("status"))
+        content = doc.create_frame("ContentArea", screen, SCREEN_W, SCREEN_H - SPACE["xl"] * 6,
+                                   layout_mode="vertical",
+                                   gap=BLOCKS.get("contentGap", SPACE["lg"]),
+                                   padding=(0.0, SPACE["lg"], 0.0, SPACE["lg"]),
+                                   sizing_h="fill", sizing_v="fill")
+        stats = [
+            {"key": "total", "value": "128", "desc": text("status"),
+             "badge": "status", "tone": "data-technical"},
+            {"key": "detected", "value": "3,420", "desc": text("status"),
+             "badge": "status", "tone": "data-technical"},
+            {"key": "duration", "value": "4.2m", "desc": text("status"),
+             "badge": "status", "tone": "status-success"},
+            {"key": "ready", "value": "6", "desc": text("status"),
+             "badge": "status", "tone": "action-primary"},
+        ]
+        DesignBlocks.add_stats_grid(doc, content, stats)
+        doc.create_text("SecTitle", text("new_project").upper(), content,
+                        font_size=TYPE["body"], font_weight="Bold",
+                        color=TOKENS["colors"]["action-primary"])
+        projects = [
+            {"key": "project_one", "pages": 41, "bubbles": 218, "mode": "status",
+             "status": "status", "progress": 82, "active": True},
+            {"key": "project_two", "pages": 28, "bubbles": 142, "mode": "status",
+             "status": "status", "progress": 45},
+            {"key": "project_three", "pages": 34, "bubbles": 190, "mode": "status",
+             "status": "status", "progress": 100, "done": True},
+        ]
+        DesignBlocks.add_project_cards_grid(doc, content, projects)
+    elif preset_name == "ledger":
+        screen = doc.create_frame(text("translation_ledger"), 1, SCREEN_W, SCREEN_H,
+                                  fill=TOKENS["colors"]["surface"],
+                                  corner_radius=tokr("window"), layout_mode="vertical",
+                                  gap=BLOCKS.get("screenGap", SPACE["lg"]),
+                                  padding=(0.0, 0.0, SPACE["lg"], 0.0), clip=True)
+        doc.build_window_bar(screen, title=text("app_name"))
+        DesignBlocks.add_app_header(doc, screen, page_info=text("status"))
+        content = doc.create_frame("ContentArea", screen, SCREEN_W, SCREEN_H - SPACE["xl"] * 6,
+                                   layout_mode="vertical", gap=SPACE["sm"],
+                                   padding=(0.0, SPACE["lg"], 0.0, SPACE["lg"]),
+                                   sizing_h="fill", sizing_v="fill")
+        search = doc.create_frame("SearchBox", content, SCREEN_W / 4.0,
+                                  TOKENS["sizes"]["field"],
+                                  fill=TOKENS["colors"]["raised"],
+                                  stroke=TOKENS["colors"]["line"],
+                                  corner_radius=tokr("control"),
+                                  layout_mode="horizontal",
+                                  padding=(0.0, SPACE["sm"], 0.0, SPACE["sm"]),
+                                  cross_align="center", sizing_h="hug", sizing_v="fixed")
+        doc.create_text("SearchTxt", text("search"), search,
+                        font_size=TYPE["caption"], color=TOKENS["colors"]["text-3"])
+        DesignBlocks.add_ledger_table(doc, content, [
+            {"page": 4, "original": "—", "result": "—", "fit": 94, "status": "status", "done": True},
+            {"page": 4, "original": "—", "result": "—", "fit": 88, "status": "status"},
+            {"page": 5, "original": "—", "result": "—", "fit": 90, "status": "status"},
+        ])
+    elif preset_name == "drawer":
+        screen = doc.create_frame(text("mobile"), 1,
+                                  BLOCKS.get("drawer", {}).get("width", SCREEN_W / 3),
+                                  BLOCKS.get("drawer", {}).get("height", SCREEN_H),
+                                  fill=CONTENT.get("scrim", TOKENS["colors"]["bg"]),
+                                  corner_radius=tokr("window"), clip=True)
+        DesignBlocks.add_mobile_drawer_sheet(doc, screen, items=[
+            {"key": "detect_bubbles", "cta": "retry"},
+            {"key": "translate_all", "cta": "submit", "variant": "primary"},
+        ])
+    else:
+        from figcraft_tool import build_workbench_screen
+        build_workbench_screen(doc, x=SPACE["xl"] * 2, y=SPACE["xl"] * 2)
+    return doc
 
+
+# ---------------------------------------------------------------------------
+# CLI + AUTO-RENDER PREVIEW
+# ---------------------------------------------------------------------------
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="FigCraft QuickDesign: token-driven UI generator with PNG previews"
+    )
+    parser.add_argument("prompt", nargs="?", default="", help="Design brief (free text)")
+    parser.add_argument("-p", "--preset",
+                        choices=["workbench", "dashboard", "ledger", "drawer"],
+                        default="workbench", help="Template preset")
+    parser.add_argument("--generate", choices=["components", "screen", "form"],
+                        help="Live Generate artifact to build inside the document")
+    parser.add_argument("--style", choices=sorted(STYLE_DIRECTIONS),
+                        help="Override style_direction for this generation")
+    parser.add_argument("--theme", choices=["dark", "light"],
+                        help="Override theme for this generation")
+    parser.add_argument("-o", "--output", required=True, help="Output .figcraft path")
+    parser.add_argument("--preview", action="store_true", help="Render a PNG preview")
+    parser.add_argument("--port", type=int, default=9880,
+                        help="Control port (default 9880, shared with agent_terminal)")
     args = parser.parse_args()
 
-    # Determine preset from prompt if provided
-    prompt_lower = args.prompt.lower()
-    selected_preset = args.preset
-    if "dash" in prompt_lower or "proyek" in prompt_lower or "card" in prompt_lower:
-        selected_preset = "dashboard"
-    elif "ledger" in prompt_lower or "tabel" in prompt_lower or "review" in prompt_lower:
-        selected_preset = "ledger"
-    elif "drawer" in prompt_lower or "sheet" in prompt_lower or "mobile" in prompt_lower:
-        selected_preset = "drawer"
-    elif "workbench" in prompt_lower or "editor" in prompt_lower:
-        selected_preset = "workbench"
+    if args.generate:
+        selected = args.generate
+        print("\n[QuickDesign] Live Generate: %s (style=%s, locale=%s, tone=%s)"
+              % (selected.upper(), args.style or STYLE, LOCALE, COPY_TONE))
+        doc = generate_live(selected, args.prompt or text("screen"),
+                            style=args.style, theme=args.theme)
+    else:
+        prompt = args.prompt.lower()
+        selected = args.preset
+        if "dash" in prompt or "project" in prompt or "card" in prompt:
+            selected = "dashboard"
+        elif "ledger" in prompt or "table" in prompt or "review" in prompt:
+            selected = "ledger"
+        elif "drawer" in prompt or "sheet" in prompt or "mobile" in prompt:
+            selected = "drawer"
+        elif "workbench" in prompt or "editor" in prompt:
+            selected = "workbench"
+        print("\n[QuickDesign] Generating: %s (style=%s)" % (selected.upper(), STYLE))
+        use_theme(args.theme)
+        doc = generate_preset(selected, args.prompt or text("app_name"))
 
-    print(f"\n🚀 [FigCraft QuickDesign] Generating UI: '{selected_preset.upper()}'")
-    doc_title = args.prompt if args.prompt else f"Kuron Studio — {selected_preset.capitalize()}"
-    doc = generate_preset(selected_preset, doc_title)
-    for warn in lint_design(doc):
-        print(f"[lint] {warn}", file=sys.stderr)
+    for warning in lint_design(doc):
+        print("[lint] %s" % warning, file=sys.stderr)
     doc.save(args.output)
-    print(f"✨ File .figcraft created: {args.output}")
+    print("Created .figcraft file: %s" % args.output)
 
-    # Render Preview if requested
     if args.preview:
         out_base, _ = os.path.splitext(args.output)
-        preview_png = f"{out_base}_preview.png"
-        print(f"📸 Rendering visual preview: {preview_png}...")
-        
-        # Launch headless FigCraft to render the screen
-        abs_fig = os.path.abspath(args.output)
-        abs_png = os.path.abspath(preview_png)
-        work_dir = os.path.dirname(abs_fig)
-
-        app_bin = os.environ.get(
-            "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
+        preview_png = out_base + "_preview.png"
+        app_bin = os.environ.get("FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
         if not os.path.exists(app_bin):
-            print(f"Preview skipped: FigCraft binary not found at {app_bin} "
-                  "(set FIGCRAFT_APP to override).")
-            return
-        cmd = [
-            app_bin,
-            "--control", str(args.port),
-            "--automation-read-root", work_dir,
-            "--automation-write-root", work_dir,
-            abs_fig
-        ]
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(1.2)
-
-        client = FigcraftClient(port=args.port)
-        rendered = False
-        try:
-            if client.connect(timeout=2.0):
-                # Inspect to find the top screen ID
-                doc_info = client.document_inspect()
-                pages = doc_info.get("result", {}).get("pages", [])
-                if pages and pages[0].get("children"):
-                    screen_id = pages[0]["children"][0].get("id")
-                    if screen_id:
-                        res = client.export_frame(screen_id, abs_png, format="png", scale=1.0)
-                        if res.get("ok"):
-                            print(f"✅ Preview exported successfully: {preview_png}")
-                            rendered = True
-        except Exception as e:
-            print(f"Warning: Render error: {e}")
-        finally:
-            client.close()
-            proc.terminate()
+            print("Preview skipped: FigCraft binary not found at %s "
+                  "(set FIGCRAFT_APP to override)." % app_bin)
+        else:
+            abs_fig = os.path.abspath(args.output)
+            abs_png = os.path.abspath(preview_png)
+            work_dir = os.path.dirname(abs_fig)
+            cmd = [app_bin, "--control", str(args.port),
+                   "--automation-read-root", work_dir,
+                   "--automation-write-root", work_dir, abs_fig]
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+            client = FigcraftClient(port=args.port)
+            rendered = False
             try:
-                proc.wait(timeout=1.0)
-            except Exception:
-                proc.kill()
+                time.sleep(1.2)
+                if client.connect(timeout=2.0):
+                    info = client.document_inspect()
+                    pages = info.get("result", {}).get("pages", [])
+                    if pages and pages[0].get("children"):
+                        node_id = pages[0]["children"][0].get("id")
+                        if node_id:
+                            rendered = bool(client.export_frame(
+                                node_id, abs_png, format="png", scale=1.0).get("ok"))
+            except Exception as exc:  # preview is best-effort
+                print("Warning: render error: %s" % exc)
+            finally:
+                client.close()
+                proc.terminate()
+                try:
+                    proc.wait(timeout=1.0)
+                except Exception:
+                    proc.kill()
+            print("Preview exported: %s" % preview_png if rendered
+                  else "Preview unavailable; open the file in FigCraft.")
 
-        if not rendered:
-            print("💡 Tip: You can open the file directly in FigCraft to view.")
+    print("Done. Ready to inspect or iterate.\n")
 
-    print("\n🎉 Done! Ready to inspect or iterate.\n")
 
 if __name__ == "__main__":
     main()

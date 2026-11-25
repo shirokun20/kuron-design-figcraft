@@ -1,147 +1,308 @@
 /*
- * kuron-design-figcraft — portable design tokens (v3.0.0)
+ * kuron-design-figcraft — portable DEFAULT PRESET tokens (v3.0.0)
  *
- * Single source of truth untuk semua warna, radius, font, dan glass.
- * Namespace --ks-* adalah konvensi skill, bukan milik repo tertentu.
- * Salin berkas ini ke konsumen, atau petakan token dengan nama yang sama.
- * Dark = default; light = :root[data-theme="light"].
- * Font di-bundel offline (fontsource), bukan CDN.
+ * NOT the final authority. The authority is the consuming project's DESIGN.md
+ * (mandatory). This file is the CSS implementation of a four-layer architecture:
+ *   primitive  --ks-p-*   raw values, free to change per brand/project
+ *   semantic   --ks-*     UI roles (stable names, values from primitives)
+ *   component  --ks-c-*   component sizes/variants (derived from semantic)
+ *   theme/state           [data-theme], [data-style], [data-current], focus, motion
+ *
+ * Every value here is a PRESET. Copy and override through DESIGN.md; do not
+ * treat the coral/cyan values or any size as skill identity. The --ks-*
+ * namespace is a skill convention, not property of any repository.
+ * Fonts are bundled offline (fontsource), not loaded from a CDN.
  */
+
+/* ------------------------------------------------------------------------- */
+/* LAYER 1 — PRIMITIVE (raw values; dark = default, light = counterpart)      */
+/* ------------------------------------------------------------------------- */
 
 :root,
 :root[data-theme="dark"] {
+  --ks-p-n0: #0d0d10;        /* deepest canvas */
+  --ks-p-n1: #141418;
+  --ks-p-n2: #1a1a20;
+  --ks-p-n3: #22222a;
+  --ks-p-n4: #2a2a33;
+  --ks-p-n5: #34343f;
+  --ks-p-l0: #26262e;        /* hairline */
+  --ks-p-l1: #35353f;        /* strong contour */
+  --ks-p-ring: #9a9aa8;
+  --ks-p-i0: #ececf1;
+  --ks-p-i1: #a5a6b0;
+  --ks-p-i2: #71727d;
+  --ks-p-brand: #ff6b5a;     /* preset primary action — freely replaceable */
+  --ks-p-brand-hover: #ff8272;
+  --ks-p-brand-fg: #1a0a08;
+  --ks-p-brand-soft: #2e1614;
+  --ks-p-tech: #35e7f5;      /* preset technical data — freely replaceable */
+  --ks-p-tech-soft: #0e2a2e;
+  --ks-p-ok: #5fd99a;
+  --ks-p-ok-soft: #10281d;
+  --ks-p-warn: #ffc15e;
+  --ks-p-warn-soft: #2b2110;
+  --ks-p-danger: #ff5c5c;
+  --ks-p-danger-soft: #2e1416;
+  --ks-p-info: #6ba6ff;
+  --ks-p-info-soft: #111e33;
+  --ks-p-illust-solid: #221f1b;
+  --ks-p-illust-on: #fffdf9;
+  --ks-p-illust-on-muted: #b9b2a6;
+  --ks-p-glass-bg: rgba(34, 34, 42, 0.72);
+  --ks-p-glass-toolbar: rgba(26, 26, 32, 0.78);
+  --ks-p-glass-floating: rgba(42, 42, 51, 0.88);
+  --ks-p-glass-specular: rgba(255, 255, 255, 0.14);
+  --ks-p-glass-border: rgba(236, 236, 241, 0.10);
+  --ks-p-glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.16);
+
   color-scheme: dark;
-
-  /* Surfaces */
-  --ks-bg: #0d0d10;
-  --ks-surface: #141418;
-  --ks-surface-2: #1a1a20;
-  --ks-raised: #22222a;
-  --ks-hover: #2a2a33;
-  --ks-selected: #34343f;
-
-  /* Lines & focus */
-  --ks-line: #26262e;
-  --ks-line-strong: #35353f;
-  --ks-ring: #9a9aa8;
-
-  /* Inks */
-  --ks-text: #ececf1;
-  --ks-text-2: #a5a6b0;
-  --ks-text-3: #71727d;
-
-  /* Accent (primary action only) */
-  --ks-accent: #ff6b5a;
-  --ks-accent-hover: #ff8272;
-  --ks-accent-fg: #1a0a08;
-  --ks-accent-soft: #2e1614;
-
-  /* Technical data (monospace only) */
-  --ks-cyan: #35e7f5;
-  --ks-cyan-soft: #0e2a2e;
-
-  /* Status */
-  --ks-success: #5fd99a;
-  --ks-success-soft: #10281d;
-  --ks-warn: #ffc15e;
-  --ks-warn-soft: #2b2110;
-  --ks-danger: #ff5c5c;
-  --ks-danger-soft: #2e1416;
-  --ks-info: #6ba6ff;
-  --ks-info-soft: #111e33;
-
-  /* Illustration helpers */
-  --ks-illust-solid: #221f1b;
-  --ks-illust-on-solid: #fffdf9;
-  --ks-illust-on-solid-muted: #b9b2a6;
-
-  /* Glass fallback (dark) */
-  --ks-glass-bg: rgba(34, 34, 42, 0.72);
-  --ks-glass-toolbar: rgba(26, 26, 32, 0.78);
-  --ks-glass-floating: rgba(42, 42, 51, 0.88);
-  --ks-glass-specular: rgba(255, 255, 255, 0.14);
-  --ks-glass-border: rgba(236, 236, 241, 0.10);
-  --ks-glass-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.16);
-
-  /* Type & geometry */
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Space Grotesk Variable", "Inter Variable", sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
-  --radius-card: 0.75rem;
 }
 
 :root[data-theme="light"] {
+  --ks-p-n0: #f7f6f4;        /* warm paper preset, not pure white everywhere */
+  --ks-p-n1: #ffffff;
+  --ks-p-n2: #f1f0ed;
+  --ks-p-n3: #e8e7e3;
+  --ks-p-n4: #deddd8;
+  --ks-p-n5: #d8d7d1;
+  --ks-p-l0: #dfdfd9;
+  --ks-p-l1: #c4c3bc;
+  --ks-p-ring: #55555f;
+  --ks-p-i0: #16161a;
+  --ks-p-i1: #55555f;
+  --ks-p-i2: #7c7c86;
+  --ks-p-brand: #c4342a;
+  --ks-p-brand-hover: #a62a21;
+  --ks-p-brand-fg: #ffffff;
+  --ks-p-brand-soft: #fbe9e7;
+  --ks-p-tech: #0b6e78;
+  --ks-p-tech-soft: #e0f2f4;
+  --ks-p-ok: #1f7a4d;
+  --ks-p-ok-soft: #e4f3ea;
+  --ks-p-warn: #8a5a00;
+  --ks-p-warn-soft: #fbf0dc;
+  --ks-p-danger: #b3261e;
+  --ks-p-danger-soft: #fde8e6;
+  --ks-p-info: #1f5fbf;
+  --ks-p-info-soft: #e5eefb;
+  --ks-p-illust-solid: #221f1b;
+  --ks-p-illust-on: #fffdf9;
+  --ks-p-illust-on-muted: #b9b2a6;
+  --ks-p-glass-bg: rgba(255, 255, 255, 0.72);
+  --ks-p-glass-toolbar: rgba(241, 240, 237, 0.78);
+  --ks-p-glass-floating: rgba(255, 255, 255, 0.88);
+  --ks-p-glass-specular: rgba(255, 255, 255, 0.70);
+  --ks-p-glass-border: rgba(22, 22, 26, 0.08);
+  --ks-p-glass-shadow: 0 8px 24px rgba(22, 22, 26, 0.08), 0 1px 2px rgba(22, 22, 26, 0.04);
+
   color-scheme: light;
+}
 
+/* Primitive scales — not themed. Override through DESIGN.md. */
+:root {
+  --ks-p-space-0: 0px;
+  --ks-p-space-1: 4px;
+  --ks-p-space-2: 8px;
+  --ks-p-space-3: 12px;
+  --ks-p-space-4: 16px;
+  --ks-p-space-5: 20px;
+  --ks-p-space-6: 24px;
+
+  --ks-p-radius-xs: 6px;
+  --ks-p-radius-sm: 8px;
+  --ks-p-radius-md: 12px;
+  --ks-p-radius-lg: 16px;
+  --ks-p-radius-pill: 9999px;
+
+  --ks-p-type-display: 20px;
+  --ks-p-type-heading: 15px;
+  --ks-p-type-body: 13px;
+  --ks-p-type-control: 12px;
+  --ks-p-type-caption: 11px;
+  --ks-p-type-mono: 10px;
+
+  --ks-p-motion-instant: 100ms;
+  --ks-p-motion-fast: 200ms;
+  --ks-p-motion-normal: 320ms;
+  --ks-p-motion-slow: 480ms;
+
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk Variable", "Inter Variable", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+/* ------------------------------------------------------------------------- */
+/* LAYER 2 — SEMANTIC (stable roles; legacy aliases kept for compatibility)   */
+/* ------------------------------------------------------------------------- */
+
+:root {
   /* Surfaces */
-  --ks-bg: #f7f6f4;
-  --ks-surface: #ffffff;
-  --ks-surface-2: #f1f0ed;
-  --ks-raised: #e8e7e3;
-  --ks-hover: #deddd8;
-  --ks-selected: #d8d7d1;
+  --ks-bg: var(--ks-p-n0);
+  --ks-surface: var(--ks-p-n1);
+  --ks-surface-2: var(--ks-p-n2);
+  --ks-raised: var(--ks-p-n3);
+  --ks-hover: var(--ks-p-n4);
+  --ks-selected: var(--ks-p-n5);
 
-  /* Lines & focus */
-  --ks-line: #dfdfd9;
-  --ks-line-strong: #c4c3bc;
-  --ks-ring: #55555f;
+  /* Lines and focus */
+  --ks-line: var(--ks-p-l0);
+  --ks-line-strong: var(--ks-p-l1);
+  --ks-ring: var(--ks-p-ring);
 
   /* Inks */
-  --ks-text: #16161a;
-  --ks-text-2: #55555f;
-  --ks-text-3: #7c7c86;
+  --ks-text: var(--ks-p-i0);
+  --ks-text-2: var(--ks-p-i1);
+  --ks-text-3: var(--ks-p-i2);
 
-  /* Accent (same role, different value) */
-  --ks-accent: #c4342a;
-  --ks-accent-hover: #a62a21;
-  --ks-accent-fg: #ffffff;
-  --ks-accent-soft: #fbe9e7;
+  /* Role: action-primary (legacy --ks-accent-* alias) */
+  --ks-accent: var(--ks-p-brand);
+  --ks-accent-hover: var(--ks-p-brand-hover);
+  --ks-accent-fg: var(--ks-p-brand-fg);
+  --ks-accent-soft: var(--ks-p-brand-soft);
 
-  /* Technical data */
-  --ks-cyan: #0b6e78;
-  --ks-cyan-soft: #e0f2f4;
+  /* Role: data-technical (legacy --ks-cyan-* alias) */
+  --ks-cyan: var(--ks-p-tech);
+  --ks-cyan-soft: var(--ks-p-tech-soft);
 
   /* Status */
-  --ks-success: #1f7a4d;
-  --ks-success-soft: #e4f3ea;
-  --ks-warn: #8a5a00;
-  --ks-warn-soft: #fbf0dc;
-  --ks-danger: #b3261e;
-  --ks-danger-soft: #fde8e6;
-  --ks-info: #1f5fbf;
-  --ks-info-soft: #e5eefb;
+  --ks-success: var(--ks-p-ok);
+  --ks-success-soft: var(--ks-p-ok-soft);
+  --ks-warn: var(--ks-p-warn);
+  --ks-warn-soft: var(--ks-p-warn-soft);
+  --ks-danger: var(--ks-p-danger);
+  --ks-danger-soft: var(--ks-p-danger-soft);
+  --ks-info: var(--ks-p-info);
+  --ks-info-soft: var(--ks-p-info-soft);
 
-  /* Illustration helpers — parity with dark */
-  --ks-illust-solid: #221f1b;
-  --ks-illust-on-solid: #fffdf9;
-  --ks-illust-on-solid-muted: #b9b2a6;
+  /* Illustration */
+  --ks-illust-solid: var(--ks-p-illust-solid);
+  --ks-illust-on-solid: var(--ks-p-illust-on);
+  --ks-illust-on-solid-muted: var(--ks-p-illust-on-muted);
 
   /* Glass */
-  --ks-glass-bg: rgba(255, 255, 255, 0.72);
-  --ks-glass-toolbar: rgba(241, 240, 237, 0.78);
-  --ks-glass-floating: rgba(255, 255, 255, 0.88);
-  --ks-glass-specular: rgba(255, 255, 255, 0.70);
-  --ks-glass-border: rgba(22, 22, 26, 0.08);
-  --ks-glass-shadow: 0 8px 24px rgba(22, 22, 26, 0.08), 0 1px 2px rgba(22, 22, 26, 0.04);
+  --ks-glass-bg: var(--ks-p-glass-bg);
+  --ks-glass-toolbar: var(--ks-p-glass-toolbar);
+  --ks-glass-floating: var(--ks-p-glass-floating);
+  --ks-glass-specular: var(--ks-p-glass-specular);
+  --ks-glass-border: var(--ks-p-glass-border);
+  --ks-glass-shadow: var(--ks-p-glass-shadow);
+
+  /* Semantic scales — consumed by components, never raw numbers */
+  --ks-space-xxs: var(--ks-p-space-1);
+  --ks-space-xs: var(--ks-p-space-2);
+  --ks-space-sm: var(--ks-p-space-3);
+  --ks-space-md: var(--ks-p-space-4);
+  --ks-space-lg: var(--ks-p-space-5);
+  --ks-space-xl: var(--ks-p-space-6);
+
+  --ks-radius-control: var(--ks-p-radius-xs);
+  --ks-radius-card: var(--ks-p-radius-md);
+  --ks-radius-window: var(--ks-p-radius-lg);
+  --ks-radius-pill: var(--ks-p-radius-pill);
+
+  --ks-type-display: var(--ks-p-type-display);
+  --ks-type-heading: var(--ks-p-type-heading);
+  --ks-type-body: var(--ks-p-type-body);
+  --ks-type-control: var(--ks-p-type-control);
+  --ks-type-caption: var(--ks-p-type-caption);
+  --ks-type-mono: var(--ks-p-type-mono);
+
+  --ks-motion-instant: var(--ks-p-motion-instant);
+  --ks-motion-fast: var(--ks-p-motion-fast);
+  --ks-motion-normal: var(--ks-p-motion-normal);
+  --ks-motion-slow: var(--ks-p-motion-slow);
 }
 
-/* Tint selalu turunan token — paritas dark/light otomatis. */
+/* ------------------------------------------------------------------------- */
+/* LAYER 3 — COMPONENT (all derived from semantic; override via DESIGN.md)    */
+/* ------------------------------------------------------------------------- */
+
+:root {
+  --ks-c-button-sm-h: 28px;
+  --ks-c-button-md-h: 32px;
+  --ks-c-button-lg-h: 40px;
+  --ks-c-button-gap: var(--ks-space-xxs);
+  --ks-c-button-radius: var(--ks-radius-control);
+
+  --ks-c-field-h: 36px;
+  --ks-c-field-radius: var(--ks-radius-control);
+  --ks-c-field-pad-x: var(--ks-space-sm);
+
+  --ks-c-badge-h: 20px;
+  --ks-c-badge-radius: var(--ks-radius-pill);
+  --ks-c-badge-font: var(--ks-type-mono);
+
+  --ks-c-card-radius: var(--ks-radius-card);
+  --ks-c-card-pad: var(--ks-space-sm);
+  --ks-c-dialog-radius: var(--ks-radius-card);
+  --ks-c-dialog-max-w: 560px;
+
+  --ks-c-focus-width: 2px;
+  --ks-c-focus-offset: 2px;
+  --ks-c-touch-min: 44px;
+  --ks-c-elevation-max: 3;
+  --ks-c-measure: 68ch;        /* used by the editorial direction */
+}
+
+/* ------------------------------------------------------------------------- */
+/* LAYER 4 — THEME / STYLE DIRECTION (dynamic presets, sourced from DESIGN.md) */
+/* ------------------------------------------------------------------------- */
+
+:root[data-style="dense_operational"] {
+  --ks-type-body: 13px;
+  --ks-space-md: var(--ks-space-3);
+  --ks-c-card-pad: var(--ks-space-xs);
+}
+
+:root[data-style="bento_modular"] {
+  --ks-radius-card: var(--ks-p-radius-lg);
+  --ks-c-card-pad: var(--ks-space-md);
+  --ks-space-md: var(--ks-space-5);
+}
+
+:root[data-style="editorial"] {
+  --ks-type-body: 15px;
+  --ks-type-display: 28px;
+  --ks-space-md: var(--ks-space-5);
+  --ks-c-measure: 72ch;
+  --ks-c-elevation-max: 2;
+}
+
+:root[data-style="clean_utility"] {
+  --ks-c-elevation-max: 1;
+  --ks-c-card-pad: var(--ks-space-sm);
+  --ks-type-body: 13px;
+}
+
+/* ------------------------------------------------------------------------- */
+/* STATE AND UTILITIES — valid in every style direction                      */
+/* ------------------------------------------------------------------------- */
+
+/* Tints always derive from tokens → automatic dark/light parity. */
 .ks-tint-accent { background: color-mix(in srgb, var(--ks-accent) 12%, transparent); }
-.ks-tint-cyan   { background: color-mix(in srgb, var(--ks-cyan) 12%, transparent); }
+.ks-tint-tech   { background: color-mix(in srgb, var(--ks-cyan) 12%, transparent); }
+.ks-tint-success{ background: color-mix(in srgb, var(--ks-success) 12%, transparent); }
+.ks-tint-warn   { background: color-mix(in srgb, var(--ks-warn) 12%, transparent); }
+.ks-tint-danger { background: color-mix(in srgb, var(--ks-danger) 12%, transparent); }
+.ks-tint-info   { background: color-mix(in srgb, var(--ks-info) 12%, transparent); }
 
-/* Fokus keyboard: penanda posisi, bukan aksi/dekorasi. */
+/* Keyboard focus: a position marker, not an action or decoration. */
 :focus-visible {
-  outline: 2px solid var(--ks-ring);
-  outline-offset: 2px;
+  outline: var(--ks-c-focus-width) solid var(--ks-ring);
+  outline-offset: var(--ks-c-focus-offset);
 }
 
-/* Baris terpilih persisten, SELALU beda dari hover. */
+/* Persistent selected row must always differ from hover. */
 [data-current="true"] { background-color: var(--ks-selected); }
 
-/* Angka tabular di badge/koordinat. */
+/* Tabular numerals for technical data and counters. */
 .tnum { font-variant-numeric: tabular-nums; }
 
-/* Hormati prefers-reduced-motion per elemen. */
+/* Touch target: minimum hit area, allowed to exceed a control's visual height. */
+.ks-touch-target { min-width: var(--ks-c-touch-min); min-height: var(--ks-c-touch-min); }
+
+/* Respect prefers-reduced-motion per element; spinners may stay alive. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -149,3 +310,10 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+ * Implementation note:
+ * - Minimum contrast comes from a11y.minContrast in DESIGN.md (AA/AAA).
+ * - Glass reads as glass only with an ambient backdrop behind the panel.
+ * - Every value above is a preset. The project's DESIGN.md wins.
+ */

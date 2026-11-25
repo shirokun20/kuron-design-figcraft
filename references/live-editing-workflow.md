@@ -1,53 +1,80 @@
-# Live Editing Workflow — `agent_terminal.py`
+# Live Workflow — Editing, Generation, Feedback, Audit and Export
 
-Workflow resmi untuk **live editing** file `.figcraft` lewat
-`scripts/agent_terminal.py` (port kontrol TCP, default `9880`). Gunakan modul
-ini saat mengedit, memantau, mengekspor, atau memverifikasi layar secara
-langsung. Padukan dengan `dark-artifact-rules.md` (gelap) atau
-`light-glass-system.md` (terang) untuk aturan token dan estetika.
+The official workflow for **live editing/generating** `.figcraft` files through
+`scripts/agent_terminal.py` (TCP control port, default `9880`). Use this module
+when editing, generating, monitoring, exporting, or verifying screens live.
+Every colour/size used during a session **MUST** come from the project's
+`DESIGN.md` (`design-tokens.css` is only a preset). Pair with
+`dark-artifact-rules.md` (execution) and `light-glass-system.md` (theme/surface)
+for aesthetic rules, and `style-directions.md` for direction.
 
-Semua perintah dijalankan dari root paket skill.
+Run all commands from the package root.
 
 ---
 
-## 1. Aturan Flag Global & Path
+## 1. Global Flag and Path Rules
 
-- Flag **`--port <PORT>` wajib ditulis SEBELUM subcommand**:
+- The global flag **`--port <PORT>` MUST appear BEFORE the subcommand**:
 
   ```bash
   python3 scripts/agent_terminal.py --port 9880 status
   ```
 
-- Port dapat diganti bebas (`--port 9901`, dst.) bila port default sibuk.
-  Port bukan konstanta — selalu baca dari flag atau `.figcraft.port`.
-- Path file `.figcraft` bersifat **tahan-cwd**: path relatif diselesaikan
-  terhadap direktori kerja/root yang berisi file tersebut. Default dapat
-  diganti lewat env var `FIGCRAFT_DESIGN`.
-- File PID/port (`.figcraft.pid`, `.figcraft.port`) ditulis di *working
-  directory* saat ini.
-- Lokasi binary FigCraft dapat diganti lewat env var `FIGCRAFT_APP`.
+- The port is freely changeable (`--port 9901`, etc.) when the default is busy.
+  It is not a constant — always read it from the flag or `.figcraft.port`.
+- `.figcraft` paths are **cwd-tolerant**: relative paths resolve against the
+  working directory/root containing the file. The default can be overridden via
+  env `FIGCRAFT_DESIGN`.
+- PID/port files (`.figcraft.pid`, `.figcraft.port`) are written in the current
+  working directory.
+- The FigCraft binary location can be overridden via env `FIGCRAFT_APP`.
 
 ---
 
-## 2. Daftar Subcommand
+## 1.1 Mandatory Live Capabilities (not optional)
 
-| Subcommand | Kegunaan | Contoh |
+| Capability | Scope | Minimum flow | Pass evidence |
+|---|---|---|---|
+| **Live Editing** | change nodes, properties, and **tokens** live; sync to file | `exec node.set` / `select.set` / `file.save` → `reload --soft` → `diff --id` | Property changed + fresh PNG |
+| **Live Generate** | **Components**, **Screen**, **Form**, modal/drawer, list/table, badges, empty/error states | call builders from `figcraft_tool.py` in-session → `frames` for real IDs → `export` | New nodes in `frames` and correct in PNG |
+| **Live Feedback** | session status, frame list, property diff, change watch | `status` → `frames` → `diff --id <ID>` → `watch` | IDs read, never guessed |
+| **Live Audit** | utilisation, overflow, topology, semantics, contrast | `audit_render.py` + pixel-by-pixel PNG inspection | Green audit numbers + clean PNG |
+| **Live Export** | single frame / all frames with scale | `export --id`, `export-all -o <dir> --scale N` | PNG opened, not merely listed |
+| **Other flows** | open another file, reload, REPL, manifest, stop, parallel work | `open`, `reload --soft/--hard`, `interactive`, `harness-info`, `stop`, `multi_agent_worker.py` | Session stopped cleanly, lock released |
+
+**Hard rules for Live Generate:**
+
+1. Generate using **builders + `DESIGN.md` tokens**, not frozen script values.
+2. New components follow **Duplicate → Refine**: copy the parent component, then
+   change only what is needed — do not assemble raw nodes per screen.
+3. After generating, always `frames` first for real IDs, then `diff`, then
+   `export`, then open the PNG. **JSON is not visual evidence.**
+4. Generated states (`empty/loading/error/disabled/focus/success`) must be
+   complete per `states` in `DESIGN.md`.
+5. Forms/modals/drawers/tables must use consistent Auto-Layout and `clip: true`
+   on screen-level frames (see §5.1).
+
+---
+
+## 2. Subcommand List
+
+| Subcommand | Use | Example |
 |---|---|---|
-| `start` | Jalankan FigCraft dengan live port (`--file/-f`, `--no-wait`) | `--port 9880 start --file out/workbench.figcraft` |
-| `status` | Cek kesehatan socket & dokumen aktif | `--port 9880 status` |
-| `open` | Buka file lain di instance berjalan | `--port 9880 open out/other.figcraft` |
-| `frames` | Daftar frame level-layar (`id`, `name`, `x/y/w/h`); `--json` | `--port 9880 frames` |
-| `reload` | `--soft` (default, aman) atau `--hard` (paksa) | `--port 9880 reload --soft` |
-| `watch` | Pantau mtime → auto reload + export-all | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
-| `exec` | JSON-RPC engine command langsung | `--port 9880 exec select.set '{"ids": [10]}'` |
-| `diff` | Ringkasan properti satu node | `--port 9880 diff --id <ID>` |
-| `export` | Ekspor SATU frame (`--id`, `-o`, `--format`, `--scale`) | `--port 9880 export --id <ID> -o out/previews/01.png --scale 2` |
-| `export-all` | Ekspor SEMUA frame ke folder | `--port 9880 export-all -o out/previews/ --scale 2` |
-| `interactive` | REPL interaktif (maks 10.000 baris) | `--port 9880 interactive` |
-| `harness-info` | Manifest JSON kapabilitas harness | `--port 9880 harness-info` |
-| `stop` | Hentikan proses FigCraft | `--port 9880 stop` |
+| `start` | Launch FigCraft with a live port (`--file/-f`, `--no-wait`) | `--port 9880 start --file out/workbench.figcraft` |
+| `status` | Check socket health and active document | `--port 9880 status` |
+| `open` | Open another file in the running instance | `--port 9880 open out/other.figcraft` |
+| `frames` | List screen-level frames (`id`, `name`, `x/y/w/h`); `--json` | `--port 9880 frames` |
+| `reload` | `--soft` (default, safe) or `--hard` (forced) | `--port 9880 reload --soft` |
+| `watch` | Watch mtime → auto reload + export-all | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
+| `exec` | Direct JSON-RPC engine command | `--port 9880 exec select.set '{"ids": [10]}'` |
+| `diff` | Summarise one node's properties | `--port 9880 diff --id <ID>` |
+| `export` | Export ONE frame (`--id`, `-o`, `--format`, `--scale`) | `--port 9880 export --id <ID> -o out/previews/01.png --scale 2` |
+| `export-all` | Export ALL frames to a folder | `--port 9880 export-all -o out/previews/ --scale 2` |
+| `interactive` | Interactive REPL (max 10,000 lines) | `--port 9880 interactive` |
+| `harness-info` | JSON manifest of harness capabilities | `--port 9880 harness-info` |
+| `stop` | Stop the FigCraft process | `--port 9880 stop` |
 
-Contoh manifest singkat:
+Example manifest:
 
 ```bash
 python3 scripts/agent_terminal.py --port 9880 harness-info
@@ -56,75 +83,102 @@ python3 scripts/agent_terminal.py --port 9880 harness-info
 
 ---
 
-## 3. Alur Live Visual Feedback Loop (WAJIB)
+## 3. Mandatory Live Visual Feedback Loop
 
-Jangan mengedit `.figcraft` secara buta atau menganggap build sukses hanya dari
-exit code. Jalankan siklus tertutup:
+Never edit `.figcraft` blindly or treat a build as successful from its exit code.
+Run this closed cycle:
 
-1. **Start & Discover**
+1. **Start and discover**
    - `start --file <file>.figcraft`
-   - `frames` untuk mendapatkan ID frame asli — **jangan pernah menebak ID**.
-2. **Edit / Mutasi**
-   - Ubah lewat builder Python (`figcraft_tool.py`) atau mutasi via `exec`
+   - `frames` to obtain real frame IDs — **never guess IDs**.
+2. **Edit / mutate / generate**
+   - Change via Python builders (`figcraft_tool.py`) or mutation through `exec`
      (`node.set`, `select.set`, `file.save`).
-   - Pastikan `lint_design()` menghasilkan **0 warning** sebelum ekspor.
-3. **Sync ke Canvas**
-   - Iterasi cepat: `watch <file> -o out/previews/ --scale 2` di terminal
-     terpisah, atau `reload --soft` setelah setiap perubahan file.
-   - `reload --hard` hanya bila `--soft` tidak menyegarkan struktur page/font.
-4. **Verifikasi Mutasi & Ekspor**
-   - `diff --id <ID>` memastikan properti benar-benar berubah.
-   - `export --id <ID>` atau `export-all` menghasilkan bukti visual.
-5. **Inspeksi Visual Piksel per Piksel**
-   - Buka PNG; periksa teks tak terpotong, tak ada tumpang tindih, kontras
-     bersih, batas `clip: true` rapi.
-   - Ulangi 2–5 sampai satu pass penuh lolos (minimal 3 pass untuk layar baru,
-     maksimal 5).
+   - Builders must read roles from `DESIGN.md`; reload values if the document
+     changes mid-session.
+   - `lint_design()` must report **0 warnings** before export.
+3. **Sync to canvas**
+   - Fast iteration: `watch <file> -o out/previews/ --scale 2` in a separate
+     terminal, or `reload --soft` after each file change.
+   - `reload --hard` only when `--soft` does not refresh page/font structure.
+4. **Verify mutation and export**
+   - `diff --id <ID>` confirms properties actually changed.
+   - `export --id <ID>` or `export-all` produces visual evidence.
+5. **Inspect the PNG pixel by pixel**
+   - Open the PNG; check for clipped text, overlaps, clean contrast, and tidy
+     `clip: true` corners.
+   - Repeat 2–5 until one full pass is clean (minimum 3 for a new screen,
+     maximum 5).
 6. **Cleanup**
-   - `stop` saat sesi selesai bila tidak ada agen lain yang memakai port itu.
+   - `stop` when the session is finished and no other agent uses that port.
 
 ---
 
-## 4. Contoh Pola `exec`
+## 4. Example `exec` Patterns
 
 ```bash
-# Pilih node
+# Select a node
 python3 scripts/agent_terminal.py --port 9880 exec select.set '{"ids": [<ID>]}'
 
-# Ubah properti (validasi JSON dulu)
-python3 scripts/agent_terminal.py --port 9880 exec node.set '{"id": <ID>, "name": "<nama>"}'
+# Change a property (validate JSON first)
+python3 scripts/agent_terminal.py --port 9880 exec node.set '{"id": <ID>, "name": "<name>"}'
 
-# Simpan dokumen aktif
+# Save the active document
 python3 scripts/agent_terminal.py --port 9880 exec file.save '{}'
 ```
 
-Gunakan single quotes di shell untuk membungkus JSON agar tidak diinterpretasi.
+Use single quotes around JSON in the shell so it is not reinterpreted.
 
 ---
 
-## 5. Guardrails & Troubleshooting
+## 5. Guardrails and Troubleshooting
 
-- **JSON invalid ditolak** sebelum dikirim ke socket; pesan ramah menyertakan
-  contoh bentuk JSON yang benar.
-- **Port sibuk / stale PID:** jalankan `status` dulu. Bila socket mati tapi
-  `.figcraft.pid` tertinggal, `stop` lalu `start` ulang (atau ganti `--port`).
-- **Jangan paralelkan dua writer** pada file `.figcraft` yang sama; `watch`
-  hanya membaca & me-render. Untuk kerja paralel pakai
-  `multi_agent_worker.py` (partisi namespace ID + lock `.figcraft.lock`).
-- **Jangan klaim dari metadata JSON:** bukti kebenaran = PNG yang dibuka.
-- **Semua socket punya timeout** (`send_rpc`, `FigcraftClient.connect`, worker),
-  dan semua loop pembacaan/polling punya cut-loop guard:
-  - `send_rpc`: maksimal 1024 potongan `recv()` per respons.
-  - `watch`: `--max-events` (default 1000) dan `--max-seconds` (default 3600).
-  - `interactive`: maksimal 10.000 baris.
-- **Binary tidak ada:** `start` melaporkan error jelas. Set `FIGCRAFT_APP`
-  ke lokasi binary; operasi offline (builder/lint/save) tetap bisa jalan.
-- **Sesi basi:** setelah edit headless di luar sesi, `reload --hard` atau
-  buka file lain lalu buka kembali file target sebelum klaim visual.
+- **Invalid JSON is rejected** before reaching the socket, with a friendly
+  message showing a valid example.
+- **Busy port / stale PID:** run `status` first. If the socket is dead but
+  `.figcraft.pid` remains, `stop` then `start` again (or change `--port`).
+- **Never run two writers** on the same `.figcraft` file; `watch` only reads and
+  renders. For parallel work use `multi_agent_worker.py` (ID namespaces + `.figcraft.lock`).
+- **Never claim from JSON metadata:** the proof is the PNG that was opened.
+- **All sockets have timeouts** (`send_rpc`, `FigcraftClient.connect`, workers),
+  and all read/poll loops have cut-loop guards:
+  - `send_rpc`: at most 1024 `recv()` chunks per response.
+  - `watch`: `--max-events` (default 1000) and `--max-seconds` (default 3600).
+  - `interactive`: at most 10,000 lines.
+- **Binary missing:** `start` reports a clear error. Set `FIGCRAFT_APP` to the
+  binary location; offline operations (builder/lint/save) still work.
+- **Stale session:** after headless edits outside the session, `reload --hard`
+  or open another file then reopen the target before any visual claim.
+- **`DESIGN.md` changed:** treat it as a visual change — reload tokens,
+  `reload --soft` (or `--hard` if structure changed), then repeat the 3–5x loop.
+  Never claim using stale colours cached in the session.
 
 ---
 
-## 6. Ringkasan Satu Baris
+## 5.1 Visual Regression Guard — Six Defects That Must Never Pass
 
-`status/start → harness-info → frames → edit → reload/watch → diff →
-export/export-all → lihat PNG (3–5x) → stop`.
+Check these in the **PNG**, not in JSON:
+
+1. **Text outside a border/frame** → fix `width`/`sizing`/Auto-Layout; do not
+   simply truncate the text.
+2. **Clipped or overlapping text** → one line = one node; reserve room with
+   `width` (not `min-width`); editing text always means re-export.
+3. **`clip: false` on a screen frame** → set `clip: true`; content must not leak
+   past the rounded frame.
+4. **Inconsistent Auto-Layout** → padding/gap follow the `semantic.space` ladder;
+   `fill/fixed/hug` follow roles; no "almost equal" numbers.
+5. **Duplicates lose styling/padding** → `diff --id` parent vs duplicate; copy
+   fill/stroke/radius/padding from the parent component before refining.
+6. **JSON differs from the real PNG** → trust the PNG: fix structure, `reload`,
+   export again, look again.
+
+Exit gate remains: at least 3 full passes, at most 5. If defects remain, **do
+not ship** — keep fixing together with `Kuron Developer` until it is correct and
+on-target, per the skill motto.
+
+---
+
+## 6. One-Line Summary
+
+`status/start → harness-info → frames → generate/edit → reload/watch → diff →
+export/export-all → audit → inspect PNG (3–5x) → stop`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Portable installer for kuron-design-figcraft 3.0.0.
+# Portable installer for kuron-design-figcraft 3.1.0.
 # Installs the clean package into <target>/skills/kuron-design-figcraft/,
 # then verifies the version lock, harness manifest, and full test suite.
 #

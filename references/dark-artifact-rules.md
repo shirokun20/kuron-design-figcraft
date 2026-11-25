@@ -1,177 +1,205 @@
-# Dark Artifact Rules — Kontrak Desain Gelap & Disiplin Eksekusi
+# Artifact Rules — Execution, Builder, and Verification Contract
 
-Modul ini mengikat aturan desain gelap dengan kontrak builder dan loop
-verifikasi. Pasangannya adalah `patterns.md` (token & geometri) dan
-`live-editing-workflow.md` (Operasi terminal live).
+> The filename is kept for compatibility. The content applies to **every theme
+> and every style direction**, not only dark. Themes differ only in the token
+> values in `DESIGN.md`.
 
----
-
-## 1. Supremasi DESIGN.md
-
-Semua warna, padding, margin, gap, radius, dan layout **wajib** mengikuti
-`DESIGN.md` dan token `--ks-*` di `design-tokens.css` / `patterns.md`. Tanpa
-nilai di luar token, tanpa tebakan angka "kira-kira bagus".
-
-- Custom prompt user mengalahkan `DESIGN.md` **hanya tepat pada yang disebut
-  eksplisit** ("tombol biru" = tombol itu biru; gap, radius, dan lain-lain tetap
-  mengikuti `DESIGN.md`). Diam = `DESIGN.md` menang.
-- Bila custom bertentangan dengan token (mis. meminta neon `#00e5ff`), turuti
-  user, tetapi **tulis di laporan** bahwa itu melanggar token — jangan
-  diam-diam dinormalkan.
+This module binds the artistic rules, builder contract, and verification loop.
+Companions: `patterns.md` (layout grammar), `DESIGN.md` (source of values),
+`light-glass-system.md` (theme/surface), `live-editing-workflow.md` (terminal).
 
 ---
 
-## 2. Aturan Artistik di Atas Token
+## 1. Supremacy of DESIGN.md
 
-> **Pengecualian kanvas dokumentasi (S-04):** diagram arsitektur, flowchart,
-> dan panduan token BUKAN layar kerja — bebas dari kewajiban CTA coral. Jangan
-> menempel tombol aksi palsu di kanvas dokumentasi.
+Every colour, padding, margin, gap, radius, type value, and layout **MUST**
+follow the project's `DESIGN.md` and the roles mapped there. No values outside
+the contract, no "roughly nice" numbers.
 
-1. **Satu protagonis per layar.** Dalam 3 detik jelas apa yang diklik. Tepat
-   satu coral primer di atas lipatan; kartu aktif = outline coral 2px, kartu
-   lain hairline netral.
-2. **Ritme gap 4/8/12/20.** Tidak ada jarak "hampir sama tapi beda".
-3. **Hierarki 3 sapuan.** Judul (Space Grotesk Bold) → body (Inter) → meta mono
-   (JetBrains Mono, `tabular-nums`).
-4. **Cyan hanya data teknis mono** (counter, koordinat, ID). Coral hanya aksi
-   utama + outline seleksi aktif.
-5. **Badge/chip tanpa border**, di atas soft-tint (`--ks-*-soft`). Progress bar
-   3–6px; fill coral hanya saat 100%, selebihnya cyan.
-6. **Microcopy nyata.** Button menyebut aksi + objek; error = sebab + jalan
-   keluar; empty state = tawaran aksi, bukan ilustrasi. Tanpa lorem/placeholder.
-7. **Keyboard & gerak.** Fokus keyboard selalu terlihat; shortcut terlihat;
-   hormati `prefers-reduced-motion`; touch target mobile ≥44px.
-8. **Detail 1px.** Window bar 32px, traffic lights 12px, grab handle 40×4px,
-   satu hairline tunggal. Tanpa gradient, shadow dekoratif, emoji-ikon.
+- **Roles, not colours.** `action-primary` = one main action; `data-technical` =
+  coordinates/IDs/counters in mono; `status-*` = status. Colours are freely
+  overridable.
+- A custom user request overrides `DESIGN.md` **only on what is stated
+  explicitly**. Silence means `DESIGN.md` wins.
+- If a request conflicts with a role or contrast, follow the user but **report
+  it** — never normalise it silently.
+- Bundled presets are used only when a project copies them into its own
+  `DESIGN.md`.
 
 ---
 
-## 3. Kontrak Builder (wajib pakai `figcraft_tool.py`)
+## 2. Artistic Rules Above Tokens
 
-| Komponen | Builder | Anatomi wajib |
+> **Documentation canvas exception:** architecture diagrams, flowcharts, and
+> token guides are NOT working screens — they are exempt from the
+> `action-primary` CTA requirement. Do not paste fake action buttons there.
+
+1. **One protagonist per screen.** Within three seconds it is clear what to
+   click. Exactly one main action above the fold; the active card gets a 2px
+   `action-primary` outline, others a neutral `line` hairline.
+2. **Spacing rhythm from `semantic.space`.** No "almost the same but different"
+   gaps.
+3. **Three-sweep hierarchy.** Heading (`display`/`heading`) → body (`body`) →
+   meta (`mono`, `tabular-nums`).
+4. **`data-technical` only for technical data.** Never for headings or
+   decoration; `action-primary` only for the main action and active selection
+   outline.
+5. **Badges/chips have no border** and sit on token-derived soft tints. Progress
+   bars are 3–6px; fill uses `action-primary` only at 100%, otherwise
+   `data-technical`.
+6. **Real microcopy.** Buttons name action + object; errors give cause + way
+   out; empty states offer an action. No lorem/placeholder text.
+7. **Keyboard and motion.** `ring` focus is always visible; shortcuts are shown;
+   `prefers-reduced-motion` is respected; touch targets are ≥
+   `a11y.minTouchTargetPx`.
+8. **1px detail.** Window bar height comes from `component` presets, single
+   hairlines, no gradients, decorative shadows, or emoji as icons.
+
+---
+
+## 3. Builder Contract (use `figcraft_tool.py`)
+
+| Component | Builder | Required anatomy |
 |---|---|---|
-| Tombol | `build_button` (+`icon_name`) | frame + ikon vektor + label; 1 coral primer per layar |
-| Badge/chip | `build_badge` | frame pil + teks mono; tanpa border, di atas soft-tint |
-| Toggle | frame + knob | track success saat ON; radius pil penuh |
-| Input | frame + teks | masker kredensial (`••••`), font mono |
-| Layar | `Screen_*` | WindowBar + body |
-| Dialog/modal | `build_dialog` | Scrim + frame radius 12 + header + body + footer (1 primer + Batal) |
-| Empty state | `build_empty_state` | Judul + deskripsi + aksi; tanpa ilustrasi |
-| Error inline | `build_error_inline` | Badge tanpa border + sebab + jalan keluar + [Coba lagi] |
-| Baris ledger | `build_ledger_row` | `#/Hlm/Asli/Hasil/Muat/Dicek`; separator 1px; 3 state |
-| Pipeline bar | `build_pipeline_bar` | 5 tahap, arrow `→`, tahap aktif coral di atas `--ks-accent-soft` |
-| Konektor | `build_connector` | network piksel mentah, rute Manhattan, kepala panah otomatis |
+| Button | `build_button` (+`icon_name`) | frame + vector icon + label; one main action per screen |
+| Badge/chip | `build_badge` | pill frame + mono text; no border, on soft tint |
+| Toggle | frame + knob | `status-success` track when ON; full pill radius |
+| Input | frame + text | masked credentials (`••••`), mono font |
+| Screen | `Screen_*` | chrome + body |
+| Dialog/modal | `build_dialog` | scrim + `card`-radius frame + header + body + footer (one primary + Cancel) |
+| Empty state | `build_empty_state` | heading + description + action; no illustration |
+| Error inline | `build_error_inline` | borderless badge + cause + way out + [Retry] |
+| Ledger row | `build_ledger_row` | `#/Page/Original/Result/Load/Check`; 1px separator; three states |
+| Pipeline bar | `build_pipeline_bar` | flow stages, arrow `→`, active stage in `action-primary` on soft tint |
+| Connector | `build_connector` | raw pixel network, Manhattan routing, automatic arrowheads |
 
-**Ikon vs garis — dua mesin berbeda.** `create_vector` mengalikan path sebagai
-grid-24 ikon; JANGAN dipakai untuk garis/konektor/panah (koordinat meledak
-4–8x). Konektor memakai network piksel mentah dengan `strokes` + `stroke`.
-Satu network per panah boleh multi-subpath (garis + kepala panah); siku
-ortogonal, bukan diagonal.
+> **Script contract (next phase):** builders must not carry a frozen
+> colour/size dictionary. `TOKENS` must be resolved from the project's
+> `DESIGN.md` at build time. Builder names above stay stable; values are dynamic.
 
-**Topologi alur:** tiap node wajib ≥1 incoming + ≥1 outgoing (kecuali
-terminal). Panah yatim = cacat.
+**Icons vs lines — two different machines.** `create_vector` multiplies a path
+as a 24-grid icon; do **not** use it for lines/connectors/arrows (coordinates
+explode 4–8x). Connectors use a raw pixel network with `strokes` + `stroke`.
+One network per arrow may have multiple subpaths (line + arrowhead); elbows are
+orthogonal, not diagonal.
 
-**Teks multiline:** satu baris = satu node (`D1`/`D2`). Renderer menumpuk `\n`
-sehingga baris 2+ menimpa node di bawahnya.
+**Flow topology:** every node must have ≥1 incoming and ≥1 outgoing edge
+(except terminals). Orphan arrows are defects.
 
-Verifikasi tiap build: `lint_design()` **0 warning** DAN export PNG menunjukkan
-glyph/ikon benar-ter-render (membaca JSON saja tidak cukup).
+**Multiline text:** one line = one node (`D1`/`D2`). The renderer stacks `\n`,
+so lines 2+ overwrite the node below.
 
-**Reuse (Duplicate → Refine):** sebelum membangun layar, salin node komponen
-yang sudah ada lalu sesuaikan bagian yang kurang tepat. Sertakan state nyata —
-`empty`, `loading/skeleton`, `error`, `disabled/focus`, dan variasi panjang
-teks/data — agar tidak ada layar "bolong". Rincian di
-`product-designer-2026.md`.
+Verify every build: `lint_design()` with **0 warnings** AND an exported PNG
+showing glyphs/icons rendered correctly (reading JSON is not enough).
+
+**Reuse (Duplicate → Refine):** before building a screen, copy an existing
+component node, then adjust what is off. Include real states — `empty`,
+`loading/skeleton`, `error`, `disabled/focus`, and text/data length variants —
+so no screen is hollow. Details: `product-designer-2026.md`.
 
 ---
 
-## 4. Loop Verifikasi Wajib 3–5x
+## 4. Mandatory 3–5x Verification Loop
 
-Satu pass tidak pernah cukup — cacat visual lolos dari lint (garis raksasa,
-tabrakan teks, typo di node dalam). Setiap hasil WAJIB lewat siklus:
+One pass is never enough — visual defects slip past lint (giant lines, text
+collisions, typos inside nodes). Every result MUST pass this cycle:
 
 ```text
-Build → lint_design (0 warning) → export PNG → lihat PNG piksel-per-piksel
-     → catat semua cacat → perbaiki → (kembali ke Build)
+Build → lint_design (0 warnings) → export PNG → inspect the PNG pixel by pixel
+     → record every defect → fix → (back to Build)
 ```
 
-**Gate keluar:** minimal **3 pass penuh**; berhenti hanya pada satu pass penuh
-bersih (lint 0 + PNG sesuai maksud). Maksimal **5 pass** — bila masih cacat,
-hentikan, laporkan sisa cacat, jangan ship.
+**Exit gate:** at least **3 full passes**; stop only on one fully clean pass
+(lint 0 + PNG matches intent). Maximum **5 passes** — if defects remain, stop,
+report them, do not ship.
 
-| Dalih | Kenyataan |
+| Excuse | Reality |
 |---|---|
-| "Satu export cukup, sudah hijau" | Lint tak melihat tabrakan/tebal garis/slop. PNG satu-satunya bukti. |
-| "Pass 1 bagus, skip 2–3" | Selalu ada pass 2; cacat tersembunyi muncul di render kedua. |
-| "Cuma teks kecil" | Edit teks = re-export. |
-| "5 pass kelamaan" | Ship slop menghabiskan revisi 3x lipat. |
+| "One export is enough, lint is green" | Lint cannot see collisions/line weight/slop. The PNG is the only proof. |
+| "Pass 1 looks good, skip 2–3" | There is always a pass 2; hidden defects appear on the second render. |
+| "It is only small text" | Editing text = re-export. |
+| "Five passes take too long" | Shipping slop costs three times more in revisions. |
 
-**Red flags — ulangi pass:** klaim "sudah bagus" tanpa PNG baru; memperbaiki
-tanpa re-export; membaca JSON sebagai ganti melihat gambar.
+**Red flags — repeat the pass:** claiming "it looks good" without a new PNG;
+fixing without re-exporting; reading JSON instead of looking at the image.
 
-**Hard checklist sebelum klaim bersih (S-05):**
-1. Utilisasi kanvas ≥60% (bounding box konten vs luas frame; bawah mati >150px = tolak).
-2. Nol teks meluber (lint S-08 diam + mata: tak ada glyph menimpa).
-3. Topologi graf utuh (tiap node ≥1 masuk + ≥1 keluar, kecuali terminal).
-4. Dot/status sesuai kamus semantik (sukses/warn/muted/info tepat makna).
-5. Tiga state list berbeda: hover / kursor keyboard / terpilih persisten.
-6. `clip: true` pada frame layar.
+**Hard checklist before claiming clean:**
+1. Canvas utilisation ≥60% (content bounding box vs frame area; >150px dead
+   space at the bottom = reject).
+2. No text overflow (lint S-08 silent + the eye: no glyph overlaps).
+3. Graph topology intact (every node has ≥1 incoming and ≥1 outgoing, except
+   terminals).
+4. Dots/statuses match the semantic dictionary (success/warn/muted/info carry
+   the right meaning).
+5. Three distinct list states: hover / keyboard cursor / persistent selection.
+6. `clip: true` on screen frames.
+7. Text/layer contrast meets `a11y.minContrast` in both themes.
 
----
-
-## 5. Aturan Anti-Asumsi (v2.1 — masih berlaku)
-
-Tiga asumsi yang terbukti salah lewat render-evidence — jangan ulangi:
-
-1. **State basi.** Jangan tebak ID/struktur dari sesi lalu. `frames` dulu tiap
-   sesi dan setelah `reload`; klaim visual wajib PNG baru.
-2. **Vektor butuh `strokes` + `stroke`.** Node hasil `create_vector` wajib
-   punya keduanya. File tanpa `strokes` render tak terlihat walau network valid.
-3. **Skema dari `save_file` live, bukan tebakan.** Buat node via live API →
-   `save_file` → baca `document.json` dari zip. Itu kontrak render engine.
-4. **Engine hanya memuat page pertama.** Subtree di page kedua tak terlihat;
-   diagram wajib di `pages[0]` atau file terpisah — verifikasi via `frames`.
-5. **`open_file` di-cache per path.** Edit headless lalu buka path yang sama =
-   basi. Paksa reload: buka file lain dulu, lalu buka kembali file target.
+**Visual Regression Guard (must never pass):** text outside a border/frame;
+clipped or overlapping text; `clip: false` overflow; Auto-Layout inconsistency
+(padding/gap/sizing drifting from tokens); duplicated nodes losing parent
+fill/stroke/radius/padding; and JSON that disagrees with the real PNG. Check all
+of these in the **PNG**, never in metadata. If defects remain after pass 5, do
+not ship — keep fixing together with `Kuron Developer` until it is correct and
+on-target.
 
 ---
 
-## 6. Peta Mesin & Anti-Halu
+## 5. Anti-Assumption Rules
 
-Engine FigCraft adalah **binary tertutup** — semua klaim perilaku wajib
-dibuktikan lewat render, bukan tebakan.
+Four assumptions proven wrong by render evidence — do not repeat them:
 
-- `figcraft-cli` (bila tersedia) adalah arbiter opsional untuk `export` headless
-  dari disk. Skill ini **tidak** bergantung padanya; fallback headless ada di
-  script yang dibundling.
-- Format `.figcraft` = zip berisi `document.json`. Kunci konektivitas: `parent`
-  ↔ `children`, plus `flows`/`prototype`. Kunci layout: `mode/wrap/gap/
-  cross_gap/padding/main_align/cross_align` (+`grid_*`). Kunci teks:
+1. **Stale state.** Never guess IDs/structure from a previous session. Run
+   `frames` each session and after `reload`; visual claims require a fresh PNG.
+2. **Vectors need `strokes` + `stroke`.** Nodes from `create_vector` must have
+   both. A file without `strokes` renders invisibly even with a valid network.
+3. **Schema from live `save_file`, not a guess.** Create a node through the live
+   API → `save_file` → read `document.json` from the zip. That is the engine's
+   rendering contract.
+4. **The engine loads only the first page.** Subtrees on page two are invisible;
+   diagrams must be in `pages[0]` or a separate file — verify via `frames`.
+5. **`open_file` is cached per path.** Headless edit then reopen the same path =
+   stale. Force a reload: open another file first, then reopen the target.
+
+---
+
+## 6. Engine Map and Anti-Hallucination
+
+The FigCraft engine is a **closed binary** — every claim about its behaviour
+must be proven by rendering, not guessed.
+
+- `figcraft-cli` (when available) is an optional arbiter for headless `export`
+  from disk. This skill does **not** depend on it; a bundled headless fallback
+  exists in the scripts.
+- `.figcraft` format = zip containing `document.json`. Connectivity keys:
+  `parent` ↔ `children`, plus `flows`/`prototype`. Layout keys: `mode/wrap/gap/
+  cross_gap/padding/main_align/cross_align` (+`grid_*`). Text keys:
   `characters/style/fills`.
-- Untuk mengetahui "node X nyambung ke apa": ikuti rantai `parent` ke atas dan
-  daftar `children` ke bawah — jangan tebak ID.
+- To learn "what is node X connected to": follow the `parent` chain upward and
+  list `children` downward — never guess IDs.
 
-**Tiga hukum besi (pelanggaran = halu):**
+**Three iron laws (violating them = hallucination):**
 
-1. **`save()` selalu reflow.** `resolve_tree_layout` menghitung ulang SEMUA
-   posisi anak autolayout. Jangan tune `y` manual — akan revert saat save
-   berikutnya. Perbaiki struktur (layout/padding/sizing).
-2. **Piksel > mata > JSON.** Ukur posisi lewat export + baris glyph, bukan
-   "kelihatannya" di PNG dan bukan angka JSON.
-3. **Sesi live bisa basi.** `reload --hard` sebelum klaim, atau pakai headless
-   yang membaca dari disk. Bila ragu, buat file probe kecil dan ukur pikselnya.
+1. **`save()` always reflows.** `resolve_tree_layout` recomputes ALL autolayout
+   child positions. Never tune `y` manually — it will revert on the next save.
+   Fix structure (layout/padding/sizing).
+2. **Pixels > eyes > JSON.** Measure positions via export + glyph rows, not by
+   "how it looks" in the PNG and not by JSON numbers.
+3. **Live sessions go stale.** `reload --hard` before a claim, or use headless
+   reading from disk. When in doubt, build a small probe and measure its pixels.
 
 ---
 
-## 7. Identitas Nama + Disiplin File Hidup
+## 7. Name Identity and Living-File Discipline
 
-ID numerik node **bisa bergeser antar save aplikasi** — peta ID lama bisa
-menunjuk node yang salah. Aturannya:
+Numeric node IDs **can shift between app saves** — an old ID map may point to
+the wrong node. Rules:
 
-1. **Samakan node by `name`, bukan ID.** Sebelum mutasi, cetak pasangan
-   `id + name` hasil load FRESH dan cocokkan nama yang dimaksud.
-2. **Jangan tulis selagi aplikasi user terbuka.** Tulis balapan dengan save
-   aplikasi menghapus kerja salah satu pihak. Koordinasi: minta jeda, backup,
-   tulis, minta reload. Selalu backup sebelum save pertama.
-3. **Lint + parity SETIAP save menangkap nyasar.** Drift >2px atau warning baru
-   vs baseline backup = edit salah sasaran — revert dulu, selidiki kemudian.
+1. **Match nodes by `name`, not ID.** Before mutating, print the fresh
+   `id + name` pair from a fresh load and match the intended name.
+2. **Do not write while the user's app is open.** Concurrent writes with the app
+   erase one side's work. Coordinate: ask for a pause, back up, write, request a
+   reload. Always back up before the first save.
+3. **Lint + parity on every save catch stray edits.** Drift over 2px or a new
+   warning versus the backup baseline means a misdirected edit — revert first,
+   investigate afterwards.

@@ -22,7 +22,7 @@ import time
 from typing import Dict, Any, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from figcraft_tool import FigcraftDocument, FigcraftClient, hex_to_rgba
+from figcraft_tool import FigcraftDocument, FigcraftClient, TOKENS, hex_to_rgba
 
 class MultiAgentSocketWorker:
     """
@@ -179,7 +179,7 @@ def simulate_concurrent_agents():
             "width": 600.0,
             "height": 800.0,
             "transform": [1.0, 0.0, 0.0, 1.0, 40.0, 40.0],
-            "fills": [{"type": "solid", "color": hex_to_rgba("#141418"), "opacity": 1.0, "visible": True}],
+            "fills": [{"type": "solid", "color": hex_to_rgba(TOKENS["colors"]["surface"]), "opacity": 1.0, "visible": True}],
             "children": [1001],
             "layout": {"mode": "vertical", "gap": 10.0, "padding": [16.0, 16.0, 16.0, 16.0]}
         }
@@ -192,7 +192,7 @@ def simulate_concurrent_agents():
             "height": 24.0,
             "font_size": 14.0,
             "font_family": "Space Grotesk",
-            "fills": [{"type": "solid", "color": hex_to_rgba("#FF6B5A"), "opacity": 1.0, "visible": True}],
+            "fills": [{"type": "solid", "color": hex_to_rgba(TOKENS["colors"]["action-primary"]), "opacity": 1.0, "visible": True}],
             "children": []
         }
         agent1_data["root_id"] = 1000
@@ -212,7 +212,7 @@ def simulate_concurrent_agents():
             "width": 600.0,
             "height": 800.0,
             "transform": [1.0, 0.0, 0.0, 1.0, 680.0, 40.0],
-            "fills": [{"type": "solid", "color": hex_to_rgba("#22222A"), "opacity": 1.0, "visible": True}],
+            "fills": [{"type": "solid", "color": hex_to_rgba(TOKENS["colors"]["raised"]), "opacity": 1.0, "visible": True}],
             "children": [2001],
             "layout": {"mode": "vertical", "gap": 10.0, "padding": [16.0, 16.0, 16.0, 16.0]}
         }
@@ -225,7 +225,7 @@ def simulate_concurrent_agents():
             "height": 24.0,
             "font_size": 14.0,
             "font_family": "Space Grotesk",
-            "fills": [{"type": "solid", "color": hex_to_rgba("#35E7F5"), "opacity": 1.0, "visible": True}],
+            "fills": [{"type": "solid", "color": hex_to_rgba(TOKENS["colors"]["data-technical"]), "opacity": 1.0, "visible": True}],
             "children": []
         }
         agent2_data["root_id"] = 2000

@@ -1,88 +1,163 @@
-# Product Designer 2026 — Empat Pilar Wajib
+# Product Designer 2026 — Four Mandatory Pillars
 
-Standar kerja `kuron-design-figcraft` sebagai product designer modern: pahami
-domain dulu, rancang menyeluruh (bukan kulit UI saja), bangun dari komponen,
-lalu eksekusi tegas. Modul ini mengikat `SKILL.md`, `patterns.md`, dan modul
-tema — bukan tambahan opsional.
+The working standard for `kuron-design-figcraft` as a modern product designer:
+understand the domain first, design the whole system (not just a UI skin), build
+from components, then execute decisively. This module binds `SKILL.md`,
+`DESIGN.md`, `patterns.md`, `style-directions.md`, and the theme modules — it is
+not optional material.
+
+The output of pillars 1 and 2 **must be written into the project's `DESIGN.md`**
+before the canvas is touched. Without that, the design is not considered
+`DESIGN.md`-backed and work must stop.
 
 ---
 
-## 1. Analisis Domain, Outcome & Opsi Gaya UI Dinamis
+## 1. Domain, Outcome, and Dynamic Style Options
 
-Sebelum menyentuh kanvas, jalankan **brief 4 pertanyaan** (maksimal 5 menit):
+Before touching the canvas, run the **four-question brief** (maximum five
+minutes):
 
-| Pertanyaan | Output |
-|---|---|
-| Jenis aplikasi? | kelas produk (operasional, konten, multi-modul, utilitas) |
-| Target user? | siapa, konteks pakai, tingkat akrabnya |
-| Masalah utama? | satu friksi yang harus hilang |
-| Outcome? | satu hasil terukur yang ingin dicapai pengguna |
-
-Lalu **tawarkan 2–3 opsi arah gaya UI & tata letak** yang sesuai konteks —
-pengguna memilih atau mengarahkan. Jangan memaksakan satu gaya seragam.
-
-| Opsi arah | Cocok untuk | Karakter |
+| Question | Output | Written to `DESIGN.md` |
 |---|---|---|
-| `dense operational` | alur kerja profesional, banyak data | baris rapat, 3 kolom, aksi cepat |
-| `bento / modular` | dashboard multi-modul, ringkasan | kartu grid asimetris, skala jelas |
-| `editorial` | konten, dokumentasi, bacaan | ritme tipografi, lebar baca terukur |
-| `clean utility` | alat sempit, setup, form | satu fokus, minimum dekorasi |
+| What kind of app? | product class (operational, content, multi-module, utility) | `style_direction` |
+| Who is the user? | who, usage context, familiarity | `style_notes`, `copy_tone` |
+| What is the main problem? | one friction that must disappear | "Direction and rationale" section |
+| What is the outcome? | one measurable result for the user | "Direction and rationale" section |
 
-**Tolak keras AI slop:** dekorasi kosong, gradasi seragam, layout klise yang
-sama untuk semua domain. Utamakan **cognitive clarity** — tiap elemen punya
-alasan hadir.
+Then **offer 2–3 UI style/layout directions** suited to the context — the user
+chooses or steers. Never force a single uniform style.
 
----
+| Direction | Best for | Character |
+|---|---|---|
+| `dense operational` | professional workflows, dense data | tight rows, three columns, fast actions |
+| `bento / modular` | multi-module dashboards, summaries | asymmetric card grid, clear scale |
+| `editorial` | content, documentation, reading | type rhythm, measured line length |
+| `clean utility` | narrow tools, setup, forms | single focus, minimal decoration |
 
-## 2. Kompetensi Product Designer Menyeluruh (Zero "Bolong")
+Token levers for each direction: `style-directions.md`. `custom` is allowed when
+`style_notes` explains the reason.
 
-Rancang sistem, bukan sekadar layar. Ceklist minimum sebelum build:
-
-- **UX Flow & IA:** alur aksi utama + sekunder jelas; hierarki informasi
-  terbaca oleh manusia dan terbaca oleh alat bantu (urutan node, nama semantik,
-  label yang bisa dibaca mesin).
-- **Microcopy fungsional:** label menyebut aksi + objek; *helper text* menjelaskan
-  format; *empty state* menawar aksi; pesan *error/validation* menyebut sebab +
-  jalan keluar. **Jangan bergantung pada warna saja** — sertakan teks/icon.
-- **State & edge cases (Zero "Bolong"):** `empty`, `loading/skeleton`,
-  `error`, `disabled/focus`, serta variasi panjang teks & jumlah data
-  (0 / 1 / banyak / sangat panjang). Setiap state punya desain nyata.
-- **Pola AI & interaksi modern (bila relevan):** status proses proporsional
-  (diam → disable → spinner → progres bertahap), kontrol/koreksi user
-  (batal, edit, ulang), dan transparansi hasil tanpa overclaim.
-- **Aksesibilitas & handoff-friendly:** kontras teks/latar WCAG AA, fokus
-  terlihat, target sentuh ≥44px, dan komposisi yang realistis dibangun
-  (token + builder yang tersedia).
+Reject AI slop firmly: empty decoration, uniform gradients, and clichéd layouts
+that are identical for every domain. Favour **cognitive clarity** — every element
+has a reason to exist, and a style decision can be explained in one sentence.
 
 ---
 
-## 3. Component-First & Reuse (Duplicate → Refine)
+## 2. Full Product-Design Competence (Zero Hollow Screens)
 
-1. **Bangun komponen dasar lebih dulu:** `input`, `form`, `button`, `icon`,
-   `card`/`list item`, dan elemen berulang — masing-masing punya *variant* dan
-   *property* yang jelas (`size`, `tone`, `state`).
-2. **Hierarki token:** `primitive → semantic → component` (lalu `theme/state`).
-   Komponen tidak pernah memakai hex mentah; ia memakai token semantik.
-3. **Di FigCraft, utamakan `Duplicate → Refine`:** salin node komponen yang
-   sudah ada, lalu rapikan/sesuaikan bagian yang kurang tepat. Jangan merakit
-   node mentah dari nol untuk setiap screen — itu sumber inkonsistensi dan
-   iterasi lambat.
-4. Perubahan pada komponen induk menyebar ke turunan. Nama node tetap semantik
-   (`Btn_<Action>`, `Card_<Name>`), cocokkan by `name`, bukan ID.
+Design a system, not merely a screen. Minimum checklist before building:
+
+- **UX Flow & IA:** primary and secondary action flows are clear; information
+   hierarchy reads for humans and assistive tools (node order, semantic names,
+   machine-readable labels).
+- **Functional microcopy:** quick recipes below. Never rely on colour alone —
+   include text or an icon.
+- **States and edge cases (zero hollow screens):** `empty`, `loading/skeleton`,
+   `error`, `disabled/focus`, plus text/data length variants (0 / 1 / many /
+   very long). Every state has a real design and is listed in `states` in
+   `DESIGN.md`.
+- **Modern AI and interaction patterns (when relevant):** proportional status,
+   user controls, and transparency without overclaiming (ladder below).
+- **Accessibility and handoff-friendly:** AA contrast (AAA when requested),
+   visible focus, touch targets ≥ `a11y.minTouchTargetPx`, reduced motion, and a
+   composition realistically buildable from the available tokens and builders.
+
+### Microcopy recipes
+
+| Context | Pattern | Example (`en-US`; substitute your `locale`) |
+|---|---|---|
+| Button | action + object | `Save changes`, not `OK` |
+| Helper/format | state the expected format | `PNG or JPG, up to 5 MB` |
+| Error/validation | cause + way out | `Could not save: connection lost. Try again.` |
+| Empty state | offer an action | `No projects yet. Create your first project.` |
+| Toast | transient result, no overclaim | `Changes saved.` |
+| Exit path | ghost, no accent | `Cancel`, `Close`, `Discard` |
+
+Language follows `locale` + `copy_tone` in `DESIGN.md`, not the skill's language.
+
+### Zero-state matrix (minimum)
+
+| State | What must be designed |
+|---|---|
+| `default` | normal view; clear three-sweep hierarchy |
+| `hover` | temporary feedback via the `hover` token; gone when the pointer leaves |
+| `focus` | `ring` 2px, offset 2px; always visible |
+| `disabled` | `opacity: 0.45`; action blocked immediately, never a new colour |
+| `empty` | heading + description + action (no illustration) |
+| `loading` | ≤1s disable controls; >1s spinner; >3s staged progress labels |
+| `error` | cause + solution; inline and persistent when it must be read/retried |
+| `success` | concise confirmation; avoid claims without real data |
+
+Include length variants too: very long text, 0/1/many rows, and extreme data.
+That is what separates a living screen from a UI skin.
+
+### AI/progress status ladder
+
+| Duration | Display |
+|---|---|
+| 0–100 ms | no indicator (too fast to throttle) |
+| 100 ms–1 s | disable the affected control |
+| 1–3 s | disable + spinner |
+| 3 s+ / multi-stage | staged progress label + cancel/retry control |
+
+- Reserve room for swapping labels with `width`, not `min-width`.
+- Always give the user a way out: `Cancel`, `Retry`, or `Edit`.
+- Keep internal process private, but show results and limits honestly.
+
+### Accessibility (binds every direction)
+
+- Text/layer contrast at least **AA** (4.5:1 normal, 3:1 large); when
+  `a11y.minContrast = "AAA"`, target 7:1 / 4.5:1.
+- Keyboard focus always visible; `prefers-reduced-motion` respected per element
+  (spinners may remain alive).
+- Touch targets ≥ `a11y.minTouchTargetPx` in touch contexts.
+- Status never colour-only — pair it with text or an icon.
+- FigCraft node order follows a sensible reading order; names are semantic.
+- Handoff includes tokens, builders, states, and contrast notes — not just a PNG.
 
 ---
 
-## 4. Eksekusi Tajam & Anti-Overthinking
+## 3. Component-First and Reuse (Duplicate → Refine)
 
-- Keputusan desain **terukur, tegas, langsung ke inti kebutuhan** — tanpa
-  perdebatan estetika bertele-tele.
-- Time-box: brief ≤5 menit → pilih satu opsi arah → build → verifikasi.
-- Guardrail tetap mutlak: 0 path pribadi, 0 secret/token, test hijau, dan loop
-  verifikasi PNG 3–5x. Tajam bukan berarti melangkahi bukti.
+1. **Build base components first:** `input`, `form`, `button`, `icon`,
+   `card`/`list item`, and repeated elements — each with clear *variants* and
+   *properties* (`size`, `tone`, `state`).
+2. **Token hierarchy:** `primitive → semantic → component` (then `theme/state`).
+   Components never use raw hex; they use semantic tokens. Details:
+   `token-architecture.md`.
+3. **In FigCraft, favour `Duplicate → Refine`:** copy an existing component node,
+   then tidy what is off. Do not assemble raw nodes from scratch for every
+   screen — that is a source of inconsistency and slow iteration.
+4. Changes to a parent component propagate to descendants. Node names stay
+   semantic (`Btn_<Action>`, `Card_<Name>`); match by `name`, not ID.
+5. Component states follow `states` in `DESIGN.md`; do not add ad hoc states that
+   are not recorded.
+6. When duplicating, preserve parent fill/stroke/radius/padding first, then
+   refine. A duplicate that loses its styling is a visual regression defect.
 
 ---
 
-## Ringkasan Satu Baris
+## 4. Sharp Execution and Anti-Overthinking
 
-`brief domain → tawarkan opsi gaya → pilih → komponen dulu → duplicate & refine
-→ state lengkap → eksekusi tegas → bukti PNG`.
+> **Mandatory motto:** *"Not code that is clever and impressive, but code that is
+> targeted, correct, and fits the actual need and root cause."* Being impressive
+> without hitting the target is slop. If a real trial shows a lacking result,
+> keep fixing it together with `Kuron Developer` until it is correct and
+> on-target.
+
+- Design decisions are **measurable, decisive, and directly on the need** — no
+  drawn-out aesthetic debate.
+- Time-box: brief ≤5 min → pick one direction → write `DESIGN.md` → components
+  first → build → verify 3–5x.
+- Guardrails remain absolute: zero private paths, zero secrets, green tests, and
+  the 3–5x PNG loop. Sharpness is not a licence to skip evidence.
+- Anti-Overthinking means cutting discussion that would not change a decision,
+  not cutting visual verification.
+
+---
+
+## One-Line Summary
+
+`domain brief → offer directions → choose & write DESIGN.md → components first →
+Duplicate & refine → complete states → accessible → decisive execution → PNG
+proof`.

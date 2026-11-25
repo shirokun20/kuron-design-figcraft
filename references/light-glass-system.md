@@ -1,207 +1,196 @@
-# Light Mode + macOS Glassmorphism & Design System
+# Surface and Theme System — Light, Glass, and Parity
 
-Standar resmi untuk merancang **Light Mode + macOS Glassmorphism** dan
-**Design System / Components Library** di `kuron-design-figcraft` (`.figcraft`
-maupun implementasi UI). Semua nilai token Light Mode selaras **1:1** dengan
-`design-tokens.css` (blok `:root[data-theme="light"]`) dan `DESIGN.md`.
-Untuk alur live editing, gunakan `live-editing-workflow.md`.
+> The filename is kept for compatibility. This module covers **light, dark, and
+> glass**, not one exclusive theme. Every value here is a **PRESET** from
+> `design-tokens.css`; the authority remains the project's `DESIGN.md`.
 
----
-
-## 1. Filosofi Visual: Eye-Comfort & Zero AI Slop
-
-1. **Anti-Silau untuk Sesi Panjang:** kanvas utama memakai warm paper `#F7F6F4`
-   (`--ks-bg`), bukan putih murni di seluruh layar. Area di balik halaman
-   memakai `--ks-raised` (`#E8E7E3`) agar halaman putih tetap punya pemisah
-   lembut tanpa menyilaukan mata.
-2. **Vibrancy macOS yang Tenang:** kaca buram hanya untuk lapisan krom/navigasi/
-   inspector mengambang — **bukan** menimpa teks atau area baca.
-3. **Zero AI Slop:**
-   - Dilarang gradasi ungu/biru/pelangi, glow neon (`#00e5ff`), atau shadow hitam pekat.
-   - **Satu protagonis per layar:** tepat 1 CTA utama (`--ks-accent` `#C4342A`) di atas lipatan.
-   - **Ramah orang awam:** label lugas yang menyebut aksi + objek, tanpa jargon teknis tanpa penjelasan.
-   - **Pemisahan jelas:** teks asli vs hasil vs elemen aktif (`--ks-accent` 2px) vs data teknis mono (`--ks-cyan` `#0B6E78` + `tabular-nums`) langsung terbaca dalam 3 detik.
+The standard for designing light themes, glassmorphism, and design systems in
+`kuron-design-figcraft` (`.figcraft` and UI implementations). For live editing,
+use `live-editing-workflow.md`; for execution rules, `dark-artifact-rules.md`.
 
 ---
 
-## 2. Color System (1:1 `design-tokens.css` Light Mode + Glass Tokens)
+## 1. Visual Philosophy: Eye Comfort and Zero AI Slop
 
-### A. Token Permukaan, Border & Teks (`:root[data-theme="light"]`)
+1. **Anti-glare for long sessions.** The preset canvas uses a warm `--ks-bg`
+   (not pure white across the whole screen). The area behind the page uses
+   `--ks-raised` so panels keep a soft separator. Projects may replace these
+   values in `DESIGN.md` — what matters is surface hierarchy, not a specific
+   colour.
+2. **Quiet vibrancy.** Frosted glass is **only** for floating chrome/navigation/
+   inspectors — never over text or reading areas. The `editorial` and
+   `clean_utility` directions may use no glass at all
+   (see `style-directions.md`).
+3. **Zero AI slop.**
+   - No uniform gradients, neon glow, or dense black shadows.
+   - **One protagonist per screen:** exactly one `action-primary` action above
+     the fold.
+   - **Reader-friendly:** plain labels naming action + object, no unexplained
+     jargon (`copy_tone` in `DESIGN.md`).
+   - **Clear separation:** original vs result vs active (`action-primary` 2px)
+     vs technical data (`data-technical` mono + `tabular-nums`) readable within
+     three seconds.
 
-| Token | Light Hex | Dark Parity | Peran Semantik |
-|---|---|---|---|
-| `--ks-bg` | `#F7F6F4` | `#0D0D10` | Kanvas aplikasi hangat (anti-silau) |
-| `--ks-surface` | `#FFFFFF` | `#141418` | Panel kerja utama / kartu solid |
-| `--ks-surface-2` | `#F1F0ED` | `#1A1A20` | Header, toolbar, rail navigasi |
-| `--ks-raised` | `#E8E7E3` | `#22222A` | Latar kanvas, kartu terangkat |
-| `--ks-hover` | `#DEDDD8` | `#2A2A33` | State hover sementara |
-| `--ks-selected` | `#D8D7D1` | `#34343F` | Baris/item terpilih persisten (`[data-current="true"]`) |
-| `--ks-line` | `#DFDFD9` | `#26262E` | Garis rambut pembatas struktural 1px |
-| `--ks-line-strong` | `#C4C3BC` | `#35353F` | Kontur jendela luar & dialog modal |
-| `--ks-ring` | `#55555F` | `#9A9AA8` | Cincin fokus `:focus-visible` (bukan dekorasi) |
-| `--ks-text` | `#16161A` | `#ECECF1` | Teks utama, judul, label aktif (WCAG AA) |
-| `--ks-text-2` | `#55555F` | `#A5A6B0` | Teks sekunder, label form, metadata |
-| `--ks-text-3` | `#7C7C86` | `#71727D` | Placeholder, shortcut, teks non-aktif |
+---
 
-### B. Token Aksen & Semantik
+## 2. Colour System = Roles, Not Hex
 
-| Token | Light Hex | Soft Tint | Dark Parity | Aturan Pakai |
+Read the `dark`/`light` pairs directly from the `DESIGN.md` block
+`tokens.semantic.color` (resolver described in that document §3). The tables
+below are only a **map of roles plus bundled preset values** for recognition.
+
+### A. Surfaces, lines, text
+
+| Role | CSS alias | Light preset | Dark preset | Function |
 |---|---|---|---|---|
-| `--ks-accent` | `#C4342A` | `#FBE9E7` | `#FF6B5A` | **Aksi utama saja** (hover `#A62A21`, fg `#FFFFFF`), outline aktif |
-| `--ks-cyan` | `#0B6E78` | `#E0F2F4` | `#35E7F5` | **Hanya data teknis mono** (koordinat, ID, counter `.tnum`) |
-| `--ks-success` | `#1F7A4D` | `#E4F3EA` | `#5FD99A` | Status selesai, online |
-| `--ks-warn` | `#8A5A00` | `#FBF0DC` | `#FFC15E` | Proses berjalan, perlu review |
-| `--ks-danger` | `#B3261E` | `#FDE8E6` | `#FF5C5C` | Aksi destruktif, error |
-| `--ks-info` | `#1F5FBF` | `#E5EEFB` | `#6BA6FF` | Info netral, tips workflow |
+| `bg` | `--ks-bg` | `#F7F6F4` | `#0D0D10` | App canvas |
+| `surface` | `--ks-surface` | `#FFFFFF` | `#141418` | Main panel / solid card |
+| `surface-2` | `--ks-surface-2` | `#F1F0ED` | `#1A1A20` | Header, toolbar, rail |
+| `raised` | `--ks-raised` | `#E8E7E3` | `#22222A` | Elevated card/panel |
+| `hover` | `--ks-hover` | `#DEDDD8` | `#2A2A33` | Transient hover state |
+| `selected` | `--ks-selected` | `#D8D7D1` | `#34343F` | Persistent selection |
+| `line` | `--ks-line` | `#DFDFD9` | `#26262E` | 1px hairline |
+| `line-strong` | `--ks-line-strong` | `#C4C3BC` | `#35353F` | Window/dialog contour |
+| `ring` | `--ks-ring` | `#55555F` | `#9A9AA8` | Focus ring (not decoration) |
+| `text` | `--ks-text` | `#16161A` | `#ECECF1` | Primary text |
+| `text-2` | `--ks-text-2` | `#55555F` | `#A5A6B0` | Secondary text |
+| `text-3` | `--ks-text-3` | `#7C7C86` | `#71727D` | Placeholder, inactive text |
 
-### C. macOS Glassmorphism & Vibrancy Tokens
+### B. Accent and status
 
-| Token | Nilai | Blur | Kegunaan |
+| Role | Light preset | Dark preset | Use |
 |---|---|---|---|
-| `--ks-glass-bg` | `rgba(255,255,255,0.72)` | `20px` | Panel frosted utama, sidebar, inspector |
-| `--ks-glass-toolbar` | `rgba(241,240,237,0.78)` | `16px` | WindowBar, top toolbar, segmented bar |
-| `--ks-glass-floating` | `rgba(255,255,255,0.88)` | `24px` | Floating mini-toolbar, popover, dropdown, modal dialog |
-| `--ks-glass-specular` | `rgba(255,255,255,0.70)` | — | Highlight hairline 1px di tepi atas/dalam panel kaca |
-| `--ks-glass-border` | `rgba(22,22,26,0.08)` | — | Border hairline luar panel kaca (fallback `--ks-line`) |
-| `--ks-glass-shadow` | `0 8px 24px rgba(22,22,26,0.08), 0 1px 2px rgba(22,22,26,0.04)` | `24px, y 8px` | Kedalaman difus lembut ala macOS; dilarang shadow gelap pekat |
+| `action-primary` | `#C4342A` | `#FF6B5A` | **One** main action; hover/fg/soft follow the role |
+| `data-technical` | `#0B6E78` | `#35E7F5` | Technical data only, mono + `.tnum` |
+| `status-success` | `#1F7A4D` | `#5FD99A` | Complete, online |
+| `status-warn` | `#8A5A00` | `#FFC15E` | In progress, needs review |
+| `status-danger` | `#B3261E` | `#FF5C5C` | Destructive action, error |
+| `status-info` | `#1F5FBF` | `#6BA6FF` | Neutral information |
 
-> **Representasi Wajib di `.figcraft` (Native FigCraft Glass Effect):** jangan
-> hanya menumpuk fill transparan datar. Wajib `effect.add` dengan `"type":
-> "glass"`: `depth: 20–26`, `frost: 8–12`, `refraction: 0.85–0.94`,
-> `dispersion: 0.35–0.45`, `lightAngle: -45`, `lightIntensity: 0.92–0.96`,
-> `splay: 0.18–0.22`, dipasangkan tint `#FFFFFF` opacity `0.28–0.40`, specular
-> stroke `#FFFFFF` (`0.78–0.80`), `dropShadow` lembut (`#16161A16`,
-> `offset: [0, 8]`, `radius: 24`), serta latar ambient hangat di belakang panel
-> kaca agar bias kaca benar-benar terasa.
+These values are **not mandatory**. `action-primary` may be blue, purple, or
+green; `data-technical` may be orange or grey. What is mandatory: stable roles,
+passing contrast, and soft tints derived from tokens.
+
+### C. Glass (optional by direction)
+
+| Role | Light preset | Dark preset | Use |
+|---|---|---|---|
+| `glass-bg` | `rgba(255,255,255,0.72)` | `rgba(34,34,42,0.72)` | Main frosted panel |
+| `glass-toolbar` | `rgba(241,240,237,0.78)` | `rgba(26,26,32,0.78)` | Window bar, toolbar |
+| `glass-floating` | `rgba(255,255,255,0.88)` | `rgba(42,42,51,0.88)` | Popover, dropdown, dialog |
+| `glass-specular` | `rgba(255,255,255,0.70)` | `rgba(255,255,255,0.14)` | 1px highlight |
+| `glass-border` | `rgba(22,22,26,0.08)` | `rgba(236,236,241,0.10)` | Outer glass border |
+| `glass-shadow` | soft diffuse | soft diffuse | macOS-like depth; dense black shadow forbidden |
+
+> **Mandatory representation in `.figcraft` when glass is used:** `effect.add`
+> with `"type": "glass"` (depth ≈20–26, frost ≈8–12, refraction ≈0.85–0.94,
+> dispersion ≈0.35–0.45, lightAngle -45, specular stroke, soft drop shadow) —
+> **not** a flat transparent fill. Add an ambient backdrop behind the panel so
+> refraction is actually visible. These numbers are native-effect presets, not
+> brand colours.
 
 ---
 
-## 3. Iconography System (Lucide Standard)
+## 3. Iconography (Lucide)
 
-- **Library:** Lucide Icons (konsisten di seluruh aplikasi, tanpa campuran pack
-  lain, **nol emoji** sebagai ikon UI).
-- **Grid & Stroke:** kanvas `24×24px`, `stroke-width: 1.75px` (atau `1.5px` di
-  ukuran `14px`), `stroke-linecap: round`, `stroke-linejoin: round`,
+- One consistent library (Lucide), **no emoji** as UI icons.
+- 24×24 grid, 1.75px stroke (1.5px at 14px), round cap/join,
   `stroke="currentColor"`.
-- **Skala resmi:** `14px` (badge/chip, metadata, shortcut), `16px` (tombol
-  sm/md, input prefix/suffix, dropdown), `20px` (toolbar, rail), `24px`
-  (header dialog, empty state, status utama).
-- **Warna semantik ikon:** default `--ks-text-2`, aktif `--ks-text` atau
-  `--ks-accent`, teknis `--ks-cyan`, status mengikuti
-  `--ks-success/warn/danger/info`.
+- Preset sizes: `14` (badge/meta), `16` (button/input), `20` (toolbar/rail),
+  `24` (dialog heading, empty state). Take values from `component`/`semantic.type`.
+- Icon colour follows roles: default `text-2`, active `text`/`action-primary`,
+  technical `data-technical`, status `status-*`.
 
 ---
 
-## 4. Typography, Spacing, Radius & Elevation
+## 4. Typography, Spacing, Radius, Elevation
 
-### A. Skala Tipografi
-- **Display / Screen Title:** `Space Grotesk`, Bold, `20pt`, line-height `1.25`.
-- **Section Heading:** `Inter`, Bold, `15pt`, line-height `1.35`.
-- **Body:** `Inter`, Medium, `13pt`, line-height `1.45`.
-- **Button / Control Label:** `Inter`, SemiBold, `12pt`, line-height `1.2`.
-- **Caption / Helper:** `Inter`, Regular, `11pt`, line-height `1.4`.
-- **Mono / Counter / Koordinat:** `JetBrains Mono`, SemiBold, `10–11pt`,
-  `font-variant-numeric: tabular-nums` (`.tnum`).
-
-### B. Spacing, Radius & Elevation
-- **Ritme gap & padding:** kelipatan ketat `4 / 8 / 12 / 16 / 20 / 24 px`.
-  Jangan angka ganjil seperti `7px` atau `13px`.
-- **Radius:** `6px` (kontrol), `12px` (kartu, glass panel, mini-toolbar,
-  modal), `16px` (root macOS window), `9999px` (badge, status dot, slider thumb).
-- **3 level elevasi:**
-  - **Level 1 (Flat/Hairline):** border 1px `--ks-line`, tanpa shadow — default.
-  - **Level 2 (Raised Glass):** `--ks-glass-bg` + specular + shadow `y:2, blur:8`.
-  - **Level 3 (Floating Glass):** `--ks-glass-floating` + specular +
-    `--ks-glass-shadow` (`y:8, blur:24`). **Level 4 dilarang.**
+- Typography and spacing **always come from `DESIGN.md`** (`semantic.type`,
+  `semantic.space`). The preset in `design-tokens.css` is only a starting point.
+- Radius uses `control / card / window / pill`.
+- Elevation is **at most 3 levels** (`component.elevation.maxLevels`):
+  hairline → raised glass → floating glass. A fourth level is forbidden.
 
 ---
 
-## 5. Reusable Components Library & States
+## 5. Components and States
 
-Semua komponen wajib memakai Auto-Layout dan mendukung state `Default`,
-`Hover`, `Focus` (`2px solid --ks-ring`, offset `2px`), dan `Disabled`
-(`opacity: 0.45`). Bangun komponen dasar lebih dulu, lalu **duplicate → refine**
-node komponen untuk layar turunan; lengkapi pula state `empty`, `loading`,
-`error`, dan variasi panjang teks (lihat `product-designer-2026.md`).
+All components use Auto-Layout and support `default`, `hover`, `focus` (`ring`
+2px, offset 2px), `disabled` (`opacity: 0.45`), plus `empty`, `loading`, `error`,
+and `success` per `DESIGN.md`. Build base components first, then
+**duplicate → refine**.
 
-| Komponen | Spesifikasi Anatomi & Ukuran | Variants & States |
+| Component | Anatomy (preset sizes) | Variants and states |
 |---|---|---|
-| **Button** | Tinggi `sm:28`, `md:32` (default), `lg:40`; radius `6px`; gap `6–8px`; label Inter SemiBold 12pt + ikon 16px | Primary (`#C4342A`, hover `#A62A21`, teks `#FFFFFF`), Secondary (`--ks-surface` + border `--ks-line-strong`), Ghost (transparan, hover `--ks-hover`), Danger (`--ks-danger` / soft) |
-| **Input / Field & Dropdown** | Tinggi `36px`; radius `6px`; padding `12px`; ikon `16px`; teks 13pt | Default (`--ks-surface` + `--ks-line`), Focus (ring `--ks-ring`), Error (border `--ks-danger` + pesan sebab & solusi di bawah) |
-| **Badge / Chip** | Tinggi `20px`; radius `9999px`; padding `8×2px`; tanpa border; JetBrains Mono 10pt | ok / warn / danger / info / cy di atas soft-tint masing-masing |
-| **Segmented Control** | Tinggi `28px`/`32px`; container `--ks-surface-2` + border `--ks-line`; radius `6px`; item aktif `--ks-surface` + shadow Level 1 | Mode, perataan teks, dll. |
-| **Slider** | Track `4px` `--ks-line-strong`; fill `--ks-accent` (atau `--ks-cyan` untuk teknis); thumb `14px` + border + shadow halus | Selalu disertai label nilai mono `.tnum` |
-| **Color Swatch / Picker** | Kotak `24×24px` radius `6px` + border `--ks-glass-border`; preset cepat + input hex mono | Active swatch = ring luar `2px --ks-accent` (offset `2px`) |
-| **Floating Mini-Toolbar** | Tinggi `36px`; `--ks-glass-floating` + specular + shadow; radius `12px`; padding `4px 8px`; gap `4px` | Muncul tepat di bawah bounding box seleksi: Font, Ukuran, Warna, Tebal, Rata, Duplikat, Hapus |
-| **Glass Card / Panel** | `--ks-glass-bg`; radius `12px`; padding `12–16px`; border `--ks-glass-border` + highlight atas | Kartu proyek, sidebar, inspector `280px` |
-| **Modal Dialog** | `--ks-glass-floating`; radius `12px`; scrim `rgba(22,22,26,0.28)`; header (judul + tombol `Tutup` ghost) + body + footer (`Batal` ghost + **1** CTA primary) | `Esc` selalu menutup dialog; klik scrim menutup; fokus terjebak di dalam dialog |
+| Button | `sm/md/lg` from `component.button.height`; `control` radius; `space.xxs` gap | Primary (`action-primary`), Secondary (`surface` + `line-strong`), Ghost, Danger |
+| Input / Dropdown | `component.field.height`; `control` radius; `space.sm` padding | Default, Focus (`ring`), Error (`danger` + cause & solution) |
+| Badge / Chip | `component.badge.height`; `pill` radius; no border | ok / warn / danger / info / technical on matching soft tints |
+| Segmented | height of `button.sm/md`; `surface-2` + `line` | Active item `surface` + elevation 1 |
+| Slider | `line-strong` track; `action-primary`/`data-technical` fill; 14px thumb | Always paired with a mono `.tnum` value label |
+| Colour swatch | 24×24, `control` radius | Active = 2px `action-primary` ring, offset 2px |
+| Mini toolbar | `glass-floating` + specular + shadow; `card` radius | Font, Size, Colour, Duplicate, Delete |
+| Glass card | `glass-bg`; `card` radius; `space.sm`–`space.md` padding | Project, sidebar, inspector |
+| Modal dialog | `glass-floating`; `card` radius; diffuse scrim | One primary CTA + ghost Cancel; `Esc` closes |
 
-### Catatan Modal Dialog (dilengkapi)
+### Modal Dialog Note
 
-Urutan anatomi wajib, dari luar ke dalam:
+1. **Scrim** covers the screen frame with no extra blur (the dialog already has
+   glass).
+2. **Dialog surface** uses `glass-floating` + native glass effect, `card` radius,
+   maximum width `component.dialog.maxWidthPx`, elevation 3.
+3. **Header:** `type.heading` title + ghost `Close` button (no accent).
+4. **Body:** one concrete consequence sentence + fields if needed; errors give
+   cause + way out, not just a code.
+5. **Footer:** exactly one `action-primary` CTA + ghost `Cancel`. Two primary
+   CTAs are forbidden.
+6. **Behaviour:** `Esc` closes the topmost layer; initial focus on title/first
+   field; focus stays inside until closed; on close, focus returns to the trigger.
 
-1. **Scrim** menutup seluruh frame layar, warna `rgba(22,22,26,0.28)`, tanpa blur
-   tambahan (glass sudah ada pada dialog).
-2. **Surface dialog** memakai `--ks-glass-floating` + native glass effect, radius
-   `12px`, lebar maksimal `560px`, elevasi Level 3.
-3. **Header:** judul `Space Grotesk Bold 15pt` + tombol `Tutup` bertipe ghost
-   (tanpa aksen, tanpa chip shortcut).
-4. **Body:** satu kalimat akibat konkret + field bila perlu. Error inline = sebab
-   + jalan keluar, bukan hanya kode.
-5. **Footer:** tepat satu CTA primary coral + `Batal` ghost. Jangan dua CTA primer.
-6. **Perilaku:** `Esc` selalu menutup lapisan teratas; fokus awal di judul atau
-   field pertama; fokus tidak keluar dialog sampai ditutup; setelah tutup,
-   fokus kembali ke elemen pemicu.
-
-Dilarang menaruh ilustrasi dekoratif, gradient, atau shadow gelap di dalam dialog.
+Decorative illustrations, gradients, and dense shadows inside the dialog are
+forbidden.
 
 ---
 
-## 6. Verification Checklist (wajib sebelum klaim selesai)
+## 6. Checklist Before Claiming Done
 
-Loloskan **semua** butir sebelum export/klaim visual:
-
-1. Kanvas memakai warm paper `#F7F6F4`, bukan putih murni seluruh layar.
-2. Glass hanya pada krom/navigasi/inspector — tidak menimpa area baca.
-3. Tepat satu CTA primer `#C4342A` di atas lipatan.
-4. Cyan `#0B6E78` hanya untuk data teknis mono + `tabular-nums`.
-5. Nol emoji sebagai ikon; semua ikon Lucide grid 24, stroke 1.75px.
-6. Badge/chip tanpa border di atas soft-tint yang tepat.
-7. Gap dan padding hanya kelipatan `4 / 8 / 12 / 16 / 20 / 24`.
-8. Radius hanya `6 / 12 / 16 / 9999`; elevasi maksimal Level 3.
-9. `Focus` memakai ring `2px --ks-ring` offset `2px`, terlihat jelas.
-10. `Disabled` memakai `opacity: 0.45`, bukan warna baru.
-11. Modal punya satu CTA primer, `Esc` menutup, fokus terjebak di dalam.
-12. Teks asli / hasil / aktif / teknis terbaca beda dalam 3 detik.
-13. Lint 0 warning **dan** PNG hasil export sudah dibuka piksel per piksel.
-14. Paritas light/dark lolos (bagian 7) untuk setiap token yang dipakai.
-
----
-
-## 7. Light/Dark Parity Rules
-
-1. **Setiap token light punya pasangan dark** di `design-tokens.css`. Memakai
-   token light tanpa pasangan dark = cacat paritas.
-2. **Satu peran = satu token.** Jangan mengarang warna "selected" atau "hover"
-   per layar; pakai `--ks-selected` / `--ks-hover`.
-3. **Tint selalu turunan token:** `color-mix(in srgb, var(--token) N%, transparent)`.
-   Dilarang hex baru untuk soft background — dengan itu paritas otomatis.
-4. **Teks/latar minimal WCAG AA** di kedua tema. `--ks-text` di light `#16161A`
-   dan di dark `#ECECF1` sudah memenuhi.
-5. **`--ks-accent` berubah makna warna** (`#C4342A` light / `#FF6B5A` dark),
-   tetapi **makna semantiknya tetap**: aksi utama. Jangan menukar perannya.
-6. **`--ks-cyan` juga berubah nilai** (`#0B6E78` / `#35E7F5`) dengan peran
-   tetap: data teknis mono.
-7. **Status (success/warn/danger/info)** wajib dibaca di kedua tema; bila
-   kontras turun, perbaiki pasangan tokennya, jangan menimpa dengan hex ad hoc.
-8. **Uji paritas dengan latar ambient:** kaca light butuh latar hangat di
-   belakangnya; kaca dark butuh surface bertingkat. Tanpa itu, efek glass
-   jadi datar dan hasil render menyesatkan.
+1. `DESIGN.md` exists, the JSON block is valid, and theme/direction are readable.
+2. Glass is only on chrome/navigation/inspectors — never over reading areas (or
+   absent entirely when the direction calls for no glass).
+3. Exactly one `action-primary` CTA above the fold.
+4. `data-technical` only for technical mono data + `.tnum`.
+5. No emoji icons; icons use a consistent 24-grid library.
+6. Badges/chips have no border and use the correct soft tint.
+7. Spacing and radius use only the ladders from `DESIGN.md`.
+8. Maximum three elevation levels; visible 2px `ring` focus; `opacity: 0.45`
+   for disabled.
+9. Dialog has one primary CTA, `Esc` closes, focus stays inside.
+10. Original vs result vs active vs technical text is distinguishable in 3 seconds.
+11. Contrast meets `a11y.minContrast` (AA/AAA) in both themes.
+12. Lint has 0 warnings **and** the exported PNG was opened pixel by pixel.
+13. Light/dark parity passes (§7) for every token used.
 
 ---
 
-## 8. Penutup
+## 7. Light/Dark Parity
 
-Modul ini melengkapi `dark-artifact-rules.md`: gelap dan terang memakai
-kontrak builder, lint, dan loop verifikasi 3–5x yang sama — yang berubah hanya
-token warna, representasi glass, dan checklist di atas. Versi paket: `3.0.0`.
+1. **Every light token has a dark counterpart** in `DESIGN.md`. A token without
+   a pair is a parity defect.
+2. **One role = one token.** Do not invent a per-screen "selected" colour.
+3. **Tints are token-derived:** `color-mix(in srgb, var(--token) N%, transparent)`.
+4. **Text/layer contrast is at least AA** (or AAA when `a11y.minContrast =
+   "AAA"`) in both themes. Preset values meet AA, but projects must re-measure
+   after changing colours.
+5. **`action-primary` may change value across themes**, but its role stays the
+   main action. The same applies to `data-technical`.
+6. **Status colours must read in both themes**; if contrast drops, fix the token
+   pair rather than overwriting with an arbitrary hex value.
+7. **Test parity with the ambient backdrop:** light glass needs a warm backdrop,
+   dark glass needs layered surfaces. Without it the glass effect looks flat.
+
+---
+
+## 8. Conclusion
+
+Dark and light share the same builder contract, linter, and 3–5x verification
+loop (`dark-artifact-rules.md`). Only token values, style direction, glass
+representation, and the checklist above change. Package version: `3.0.0`.

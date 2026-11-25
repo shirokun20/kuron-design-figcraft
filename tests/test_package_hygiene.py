@@ -1,8 +1,8 @@
 """Package hygiene: zero leaks, valid frontmatter, locked versions.
 
-Dijalankan oleh `python3 -m unittest discover -s tests -p 'test_*.py' -v`.
-Pola pencarian dirakit dari potongan agar berkas test ini sendiri tidak
-mengandung literal yang dicarinya (self-detection).
+Run with `python3 -m unittest discover -s tests -p 'test_*.py' -v`.
+Search patterns are assembled from fragments so this test file itself does
+not contain the literals it searches for (self-detection).
 """
 import os
 import re
@@ -85,7 +85,7 @@ class HygieneTests(unittest.TestCase):
         harness_match = re.search(r'^HARNESS_VERSION\s*=\s*["\']([^"\']+)',
                                   read_text(HARNESS), re.M)
         harness_version = harness_match.group(1) if harness_match else None
-        self.assertEqual(version, "3.0.0")
+        self.assertEqual(version, "3.1.0")
         self.assertEqual(skill_version, version)
         self.assertEqual(harness_version, version)
 
@@ -106,7 +106,7 @@ class HygieneTests(unittest.TestCase):
         body = read_text(reference)
         self.assertIn("Product Designer 2026", skill)
         self.assertIn("Design Approach (2026 standard)", readme)
-        for needle in ("cognitive clarity", "Duplicate", "Zero \"Bolong\"",
+        for needle in ("cognitive clarity", "Duplicate", "Zero Hollow Screens",
                        "Anti-Overthinking", "handoff", "bento"):
             self.assertIn(needle, body, f"missing pillar content: {needle}")
 

@@ -21,6 +21,9 @@ import subprocess
 import signal
 from typing import Optional, Dict, Any, List, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from design_manifest import load_design  # noqa: E402
+
 DEFAULT_PORT = 9880
 PID_FILE = os.path.join(os.getcwd(), ".figcraft.pid")
 PORT_FILE = os.path.join(os.getcwd(), ".figcraft.port")
@@ -28,7 +31,7 @@ PORT_FILE = os.path.join(os.getcwd(), ".figcraft.port")
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 DEFAULT_DESIGN_REL = os.environ.get("FIGCRAFT_DESIGN", "design/workbench.figcraft")
-HARNESS_VERSION = "3.0.0"
+HARNESS_VERSION = "3.1.0"
 HARNESS_NAME = "kuron-design-figcraft"
 
 # Cut-loop guards: no read/poll loop may run unbounded.
@@ -802,9 +805,13 @@ def main():
         print(json.dumps(res, indent=2))
 
     elif args.cmd == "harness-info":
+        design = load_design()
         manifest = {
             "name": HARNESS_NAME,
             "version": HARNESS_VERSION,
+            "design_contract": design["$schema"],
+            "style_direction": design["style_direction"],
+            "theme": design.get("default_theme", "dark"),
             "protocol": "TCP JSON-RPC 2.0",
             "default_port": DEFAULT_PORT,
             "port_active": term.is_port_listening(),

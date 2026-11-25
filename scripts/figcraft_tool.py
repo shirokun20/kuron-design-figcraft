@@ -14,6 +14,8 @@ import socket
 import subprocess
 import time
 import argparse
+import re
+import copy
 from typing import Dict, List, Optional, Any, Union, Tuple
 
 # Make sibling modules (e.g. build_artistic_flow) importable from any cwd.
@@ -21,78 +23,36 @@ _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
+from design_manifest import (  # noqa: E402
+    DesignManifestError,
+    contrast_ratio,
+    describe_overrides,
+    load_design,
+    resolve,
+    to_builder_tokens,
+)
+
 # ---------------------------------------------------------------------------
-# DESIGN TOKENS (Kuron Studio Design System)
+# DESIGN TOKENS — sourced from DESIGN.md (design-contract/v1)
 # ---------------------------------------------------------------------------
-TOKENS = {
-    "colors": {
-        # Surfaces — 1:1 dengan token --ks-* di references/design-tokens.css (dark default)
-        "bg_app": "#0d0d10",            # Canvas / frame terdalam (--ks-bg)
-        "surface": "#141418",           # Latar utama halaman (--ks-surface)
-        "surface_2": "#1a1a20",         # Panel, sidebar, toolbar (--ks-surface-2)
-        "surface_card": "#22222a",       # Kartu, container raised (--ks-raised)
-        "surface_active": "#2a2a33",     # Hover / state aktif (--ks-hover)
-        "border": "#26262e",             # Separator 1px (--ks-line)
-        "border_subtle": "#26262e",      # Garis halus (--ks-line)
-        "border_accent": "#35353f",      # Border tegas dialog / jendela (--ks-line-strong)
+# No frozen colour/size dictionary lives here. Every value is resolved from
+# the project manifest; a missing or invalid manifest raises an actionable
+# error at import time rather than silently using a built-in preset.
+DESIGN_DOC = load_design()
+DESIGN_THEME = DESIGN_DOC.get("default_theme", "dark")
+TOKENS = to_builder_tokens(DESIGN_DOC, DESIGN_THEME)
+FONTS = TOKENS["typography"]
+CONTENT = TOKENS["content"]
+LINT_CONFIG = DESIGN_DOC.get("lint", {})
+SPACE = resolve(DESIGN_DOC["tokens"]["semantic"]["space"], DESIGN_DOC, DESIGN_THEME)
+TYPE = resolve(DESIGN_DOC["tokens"]["semantic"]["type"], DESIGN_DOC, DESIGN_THEME)
+COMPONENT = resolve(DESIGN_DOC["tokens"]["component"], DESIGN_DOC, DESIGN_THEME)
+GEOMETRY = DESIGN_DOC.get("geometry", {})
 
-        # Inks (tipografi)
-        "ink_primary": "#ececf1",    # Judul, teks utama (--ks-text)
-        "ink_secondary": "#a5a6b0",  # Teks tubuh, metadata (--ks-text-2)
-        "ink_muted": "#71727d",      # Placeholder, non-aktif (--ks-text-3)
 
-        # Aksen coral = aksi utama SAJA
-        "coral": "#ff6b5a",          # Primary CTA (--ks-accent)
-        "coral_hover": "#ff8272",    # Hover aksi utama (--ks-accent-hover)
-        "coral_fg": "#1a0a08",       # Teks di atas coral (--ks-accent-fg)
-        "coral_subtle": "#2e1614",   # Latar soft badge coral (--ks-accent-soft)
-        # Cyan = info teknis saja. DILARANG memakai neon #00e5ff — pakai #35e7f5.
-        "cyan": "#35e7f5",           # Info teknis (--ks-cyan)
-        "cyan_subtle": "#0e2a2e",    # Latar soft cyan (--ks-cyan-soft)
-        "success": "#5fd99a",        # Selesai / online (--ks-success)
-        "success_subtle": "#10281d",  # Latar badge selesai (--ks-success-soft)
-        "warning": "#ffc15e",        # Berjalan / perlu cek (--ks-warn)
-        "warning_subtle": "#2b2110",  # Latar badge berjalan (--ks-warn-soft)
-        "danger": "#ff5c5c",         # Destruktif / error (--ks-danger)
-        "danger_subtle": "#2e1416",   # Latar badge error (--ks-danger-soft)
-        "info": "#6ba6ff",           # Status info netral (--ks-info)
-        "info_subtle": "#111e33",    # Latar badge info (--ks-info-soft)
-
-        # Seleksi & fokus — BUKAN dekorasi, BUKAN border statis.
-        "ring": "#9a9aa8",          # Cincin fokus keyboard + halo seleksi (--ks-ring; light #55555f)
-        "selected": "#34343f",      # Latar baris terpilih persisten (--ks-selected; light #d8d7d1)
-    },
-    "typography": {
-        "font_ui": "Inter",
-        "font_brand": "Space Grotesk",
-        "font_mono": "JetBrains Mono",
-        "sizes": {
-            "hero": 28.0,
-            "title": 20.0,
-            "heading": 15.0,
-            "body": 13.0,
-            "caption": 11.0,
-            "badge": 10.0,
-        }
-    },
-    "radii": {
-        "control": 6.0,   # Buttons, inputs, small tags
-        "badge": 9999.0,  # Pills / round badges
-        "card": 12.0,     # Cards, modals, dialogs
-        "window": 16.0,   # Outer application windows / screens
-    },
-    "sizes": {
-        "btn_sm": 28.0,
-        "btn_md": 32.0,   # Default button height
-        "btn_lg": 40.0,
-        "field": 36.0,    # Input field height
-        "icon_sm": 16.0,  # DESIGN.md: ikon sm
-        "icon_md": 20.0,  # DESIGN.md: ikon md (default)
-        "icon_lg": 24.0,  # DESIGN.md: ikon lg
-        "header": 32.0,   # App header = 32px (patterns.md Window Bar; bukan 44)
-        "window_bar": 32.0,
-    }
-}
+def get_tokens(theme: Optional[str] = None) -> Dict[str, Any]:
+    """Return builder tokens resolved for an explicit theme."""
+    return to_builder_tokens(DESIGN_DOC, theme or DESIGN_THEME)
 
 def hex_to_rgba(hex_str: str, alpha: float = 1.0) -> Dict[str, float]:
     """Convert hex color (#RRGGBB or #RRGGBBAA) to FigCraft RGBA float dict (0.0 - 1.0)."""
@@ -135,16 +95,16 @@ def make_solid_stroke(hex_str: str, opacity: float = 1.0) -> List[Dict[str, Any]
     }]
 
 # ---------------------------------------------------------------------------
-# TEKS & IKON (estimasi + Lucide; dipakai create_text/build_button)
+# TEXT & ICONS (measurement + Lucide; used by create_text/build_button)
 # ---------------------------------------------------------------------------
 def estimate_text_width(text: str, font_size: float, font_family: str = "Inter") -> float:
-    """Estimasi lebar teks px (sama rumus dengan test_layout_engine.py).
+    """Estimate text width in px (same formula as test_layout_engine.py).
 
-    Mono ~0.62*size, Space Grotesk ~0.58*size, lainnya ~0.52*size, +2 padding.
-    Dipakai create_text/build_button supaya headless tidak meluap.
-    Kalibrasi 2026-11-08: median engine/app = 0.94x estimasi lama
-    (0.55) utk Latin; CJK ~0.98 (tak diubah). Estimasi sengaja sedikit
-    konservatif (box >= glyph) supaya tak terpotong.
+    Mono ~0.62*size, Space Grotesk ~0.58*size, others ~0.52*size, +2 padding.
+    Used by create_text/build_button so headless output does not overflow.
+    Calibration 2026-11-08: engine/app median = 0.94x the older estimate
+    (0.55) for Latin text; CJK ~0.98 (unchanged). The estimate is deliberately
+    slightly conservative (box >= glyph) so text is never clipped.
     """
     if "Mono" in font_family:
         return len(text) * font_size * 0.62 + 2
@@ -153,8 +113,8 @@ def estimate_text_width(text: str, font_size: float, font_family: str = "Inter")
     return len(text) * font_size * 0.52 + 2
 
 
-# Path ikon Lucide v0.469.0 (grid 24, stroke round) untuk tombol.
-# Skala = icon_dim/24. Jangan gambar ikon sebagai rect outline.
+# Lucide icon paths v0.469.0 (grid 24, round stroke) for buttons.
+# Scale = icon_dim/24. Never draw an icon as a rectangle outline.
 ICON_PATHS = {
     "x": ["M18 6 6 18", "m6 6 12 12"],
     "check": ["M20 6 9 17l-5-5"],
@@ -229,8 +189,8 @@ class FigcraftDocument:
             from build_artistic_flow import resolve_tree_layout
         except ImportError as exc:
             raise RuntimeError(
-                "build_artistic_flow.py wajib ada di direktori scripts/ yang sama "
-                "dengan figcraft_tool.py (resolve_tree_layout)"
+                "build_artistic_flow.py must be in the same scripts/ directory as "
+                "figcraft_tool.py (resolve_tree_layout)"
             ) from exc
         for pid in self.doc.get("pages", [1]):
             page = self.doc["nodes"].get(str(pid))
@@ -243,17 +203,17 @@ class FigcraftDocument:
         try:
             self.resolve_layout()
         except Exception as e:
-            # Dulu except-pass diam: menutupi mistake reflow. Sekarang
-            # warn-only ke stderr (build tetap jalan, SKILL §2).
-            print(f"figcraft_tool: resolve_layout gagal ({e}) — save tanpa reflow.",
+            # Previously a silent except-pass hid reflow mistakes. Now it is
+            # warn-only on stderr (the build still proceeds, SKILL §2).
+            print(f"figcraft_tool: resolve_layout failed ({e}) — saving without reflow.",
                   file=sys.stderr)
 
-        # Guard multi-page (SKILL §7.4): engine live + export hanya
-        # memuat subtree pages[0]; page kedua tak terlihat walau valid.
+        # Multi-page guard (SKILL §7.4): the live engine + export only
+        # load the pages[0] subtree; a second page is invisible even if valid.
         if len(self.doc.get("pages", [1])) > 1:
-            print("figcraft_tool: dokumen multi-page — engine hanya memuat "
-                  f"pages[0] {self.doc.get('pages')}. Pindahkan diagram ke "
-                  "file terpisah bila page non-pertama tak ter-render.",
+            print("figcraft_tool: multi-page document — the engine only loads "
+                  f"pages[0] {self.doc.get('pages')}. Move the diagram to "
+                  "a separate file if non-first pages do not render.",
                   file=sys.stderr)
 
         path = output_path or self.file_path
@@ -277,8 +237,8 @@ class FigcraftDocument:
 
         temp_path = path + ".tmp"
         with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
-            # Compact seperti engine (SKILL §7.3: skema dari save-live):
-            # indent=2 menggembungkan document.json 2x lipat tanpa manfaat.
+            # Compact like the engine (SKILL §7.3: schema from live save):
+            # indent=2 doubles document.json size without benefit.
             z.writestr("document.json", json.dumps(self.doc, separators=(",", ":")))
             z.writestr("thumbnail.png", existing_thumb or png_1x1)
         
@@ -308,6 +268,100 @@ class FigcraftDocument:
                 parent["children"].append(nid)
 
         return nid
+
+    def duplicate_node(
+        self,
+        node_id: int,
+        parent_id: Optional[int] = None,
+        name: Optional[str] = None,
+        x: Optional[float] = None,
+        y: Optional[float] = None,
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> Optional[int]:
+        """Duplicate a component subtree for component-first reuse.
+
+        Every descendant gets a fresh id, its ``parent`` link is remapped, and
+        fills, strokes, radius, padding, and layout are preserved verbatim.
+        A visited set and a hard ceiling keep the traversal bounded even if a
+        malformed document contains a parent cycle.
+        """
+        root = self.doc["nodes"].get(str(node_id))
+        if not isinstance(root, dict):
+            return None
+        target_parent = parent_id if parent_id is not None else root.get("parent", 1)
+        id_map: Dict[int, int] = {}
+        todo = [node_id]
+        visited: set = set()
+        while todo and len(visited) < 100000:  # cut-loop guard
+            old_id = str(todo.pop())
+            if old_id in visited:
+                continue
+            visited.add(old_id)
+            source = self.doc["nodes"].get(old_id)
+            if not isinstance(source, dict):
+                continue
+            for child in source.get("children", []) or []:
+                todo.append(child)
+
+        # Allocate the root first so the duplicate root id is deterministic.
+        ordered = [str(node_id)] + sorted(visited - {str(node_id)})
+        for old_id in ordered:
+            source = self.doc["nodes"][old_id]
+            new_id = self.alloc_id()
+            id_map[int(old_id)] = new_id
+            clone = copy.deepcopy(source)
+            clone["id"] = new_id
+            if old_id == str(node_id):
+                if parent_id is not None:
+                    clone["parent"] = parent_id
+                if name is not None:
+                    clone["name"] = name
+                if x is not None or y is not None:
+                    transform = list(clone.get("transform", [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
+                    if x is not None:
+                        transform[4] = float(x)
+                    if y is not None:
+                        transform[5] = float(y)
+                    clone["transform"] = transform
+                if overrides:
+                    clone.update(copy.deepcopy(overrides))
+            self.doc["nodes"][str(new_id)] = clone
+
+        # Remap links only after every id is allocated, so a child processed
+        # before its parent still points at the duplicated parent.
+        for old_id, new_id in id_map.items():
+            clone = self.doc["nodes"][str(new_id)]
+            if old_id != int(node_id):
+                old_parent = self.doc["nodes"][str(old_id)].get("parent")
+                clone["parent"] = (id_map.get(int(old_parent), target_parent)
+                                   if old_parent is not None else target_parent)
+            clone["children"] = [id_map[int(child)] for child in clone.get("children", []) or []
+                                 if int(child) in id_map]
+        parent = self.doc["nodes"].get(str(target_parent))
+        if isinstance(parent, dict):
+            new_root = id_map.get(int(node_id))
+            if new_root is not None:
+                children = parent.setdefault("children", [])
+                if new_root not in children:
+                    children.append(new_root)
+        return id_map.get(int(node_id))
+
+    def component_first(self, component_id: int, parent_id: int,
+                        **overrides: Any) -> Optional[int]:
+        """Duplicate an existing component (the component-first workflow)."""
+        return self.duplicate_node(component_id, parent_id=parent_id,
+                                   overrides=overrides or None)
+
+    def prevent_clipping(self, node_id: int) -> bool:
+        """Enable clipping on a screen-level frame to contain child content."""
+        node = self.doc["nodes"].get(str(node_id))
+        if not isinstance(node, dict) or node.get("type") != "frame":
+            return False
+        threshold = GEOMETRY.get("screen", {}).get("width", 1000)
+        if (node.get("width") or 0) >= threshold:
+            node["clip"] = True
+            return True
+        return False
 
     # --- Node Creation Helpers ---
 
@@ -400,7 +454,7 @@ class FigcraftDocument:
         font_size: float = 13.0,
         font_weight: str = "Regular", # "Regular" | "Medium" | "SemiBold" | "Bold"
         font_family: str = "Inter",
-        color: str = "#ffffff",
+        color: Optional[str] = None,
         x: float = 0.0,
         y: float = 0.0,
         width: Optional[float] = None,
@@ -409,13 +463,14 @@ class FigcraftDocument:
         sizing_v: str = "hug",
         max_w: Optional[float] = None,
     ) -> int:
-        # R1: lawan text-overflow (node 1020 279px meluap dari card 233.6px).
-        # Paritas engine 2026-11-08: reflow TIDAK menimpa ukuran teks yang
-        # sudah terukur (save app memakai metrik font asli). Karena itu
-        # create menyimpan 0 (kosong) bila pemanggil tak memberi eksplisit;
-        # reflow mengisi via estimasi HANYA saat kosong. S-08 tetap hijau
-        # karena lint melihat hasil pasca-save, bukan angka lahir.
-        # Truncation visual urusan renderer; width tersimpan harus jujur.
+        # R1: prevent text overflow (node 1020 was 279px inside a 233.6px card).
+        # Engine parity 2026-11-08: reflow NEVER overwrites an already-measured
+        # text size (the app save uses real font metrics). Therefore create
+        # stores 0 (empty) when the caller gives no explicit width; reflow
+        # fills it via estimation ONLY when empty. S-08 stays green because
+        # lint inspects the post-save result, not the birth value.
+        # Visual truncation is the renderer's job; the stored width stays honest.
+        color = color or CONTENT.get("sheet") or TOKENS["colors"]["ink_primary"]
         estimated = estimate_text_width(text, font_size, font_family)
         if width is None:
             width = 0.0
@@ -469,37 +524,38 @@ class FigcraftDocument:
         stroke: Optional[str] = None,
         stroke_width: float = 1.5,
     ) -> int:
-        """Vektor ikon (Lucide 24-grid) dengan skema file ASLI engine.
+        """Create an icon vector (Lucide 24-grid) with the engine's real file schema.
 
-        Dibuktikan via live session (probe node → save → baca document.json):
-        engine menyimpan vector network {vertices[{x,y,radius}],
-        segments[{a,b,ta,tb}], regions[]}, BUKAN string path. SEMANTIK
-        TRANSFORM: posisi render = transform tersimpan apa adanya; engine
-        live MENAMBAH bbox-min saat create via API. Karena file dibaca
-        mentah, path DINORMALISASI dulu (bbox-min → 0,0, skala width/24)
-        sehingga transform (x, y) = posisi render persis — tak perlu koreksi
-        node.set. Warna stroke = list `strokes` (paint solid) + metadata
-        `stroke` (weight/align/cap round ala Lucide); KEDUANYA wajib ada —
-        file tanpa `strokes` ter-render tak terlihat. Lihat log untuk konteks.
+        Proven via a live session (probe node → save → read document.json):
+        the engine stores a vector network {vertices[{x,y,radius}],
+        segments[{a,b,ta,tb}], regions[]}, NOT a path string. TRANSFORM
+        semantics: render position = the stored transform as is; the live
+        engine ADDS bbox-min when creating via API. Because files are read
+        raw, paths are normalised first (bbox-min → 0,0, scale width/24) so
+        transform (x, y) equals the exact render position — no node.set
+        correction needed. Stroke colour = the `strokes` list (solid paint)
+        plus `stroke` metadata (weight/align/round cap as in Lucide); BOTH are
+        required — a file without `strokes` renders invisible. See the log
+        for context.
         """
         import re as _re
         scale = float(width) / 24.0 if width else 1.0
 
         def _subpaths() -> List[List[Tuple[float, float]]]:
-            """Parse path menjadi daftar subpath (satu per M/m; Z menutup).
+            """Parse a path into subpaths (one per M/m; Z closes).
 
-            Segment HANYA menghubungkan titik dalam subpath yang sama —
-            segmen lintas-subpath menggambar garis liar (mistake: ikon x
-            berekor diagonal). Kurva C dipecah per titik kontrol
-            (aproksimasi terdokumentasi, cukup untuk set ikon Lucide).
+            Segments ONLY connect points inside the same subpath —
+            cross-subpath segments draw stray lines (an old bug gave the x icon
+            a diagonal tail). C curves are split per control point
+            (documented approximation, sufficient for the Lucide icon set).
             """
             subs: List[List[Tuple[float, float]]] = []
             cur: List[Tuple[float, float]] = []
             for d in path_data:
-                # Tiap string path independen (satu atribut d SVG): titik
-                # awal kembali ke (0,0). Tanpa ini, "m12 5..." pada string
-                # kedua panah dihitung dari ujung string pertama (meluber
-                # ke 31,36 di luar grid 24).
+                # Each path string is independent (one SVG d attribute): the
+                # start point resets to (0,0). Without this, "m12 5..." in the
+                # second string of an arrow is measured from the end of the
+                # first string (overflowing to 31,36 outside the grid 24).
                 cx = cy = sx = sy = 0.0
                 toks = _re.findall(r"[MmLlHhVvCcZz]|-?\d*\.?\d+", d)
                 cmd = "M"
@@ -515,9 +571,9 @@ class FigcraftDocument:
                             cur.append((sx, sy))
                         i += 1
                         continue
-                    # SVG: pasangan koordinat setelah M/m = lineto implisit.
-                    # Tanpa ini, "M18 6 6 18" pecah jadi 2 subpath 1-titik
-                    # (ikon x kehilangan segmennya).
+                    # SVG: coordinate pairs after M/m = implicit lineto.
+                    # Without this, "M18 6 6 18" splits into two 1-point
+                    # subpaths (the x icon loses its segment).
                     if cmd == "M":
                         if cur:
                             subs.append(cur)
@@ -606,11 +662,11 @@ class FigcraftDocument:
             "height": float(max_y),
         }
         if stroke:
-            # Renderer file membaca `strokes` (list, dicat warna) + `stroke`
-            # (dict metadata weight/align/cap). Dibuktikan: live-create yang
-            # ter-render menyimpan KEDUANYA; file tanpa `strokes` = tak
-            # terlihat walau network valid (regions[] kosong → fills tak
-            # berpengaruh pada subpath terbuka).
+            # The file renderer reads `strokes` (painted list) + `stroke`
+            # (weight/align/cap metadata dict). Proven: a live-created,
+            # rendered node stores BOTH; a file without `strokes` is invisible
+            # even with a valid network (empty regions[] → fills do not apply
+            # to open subpaths).
             vec_node["fills"] = []
             vec_node["strokes"] = make_solid_stroke(stroke)
             vec_node["stroke"] = {
@@ -638,14 +694,14 @@ class FigcraftDocument:
         style: str = "solid",       # "solid" | "dashed"
         color: Optional[str] = None,
         width: float = 2.0,
-        offset: float = 0.0,        # geser garis tengah (mis. loopback ke atas)
+        offset: float = 0.0,        # shift the centre line (e.g. upward loopback)
     ) -> int:
         """Panah ortogonal antar node (S-03) — pengganti vektor ad-hoc.
 
-        Anchor di tengah sisi; rute Manhattan dengan satu siku; kepala
-        panah searah segmen terakhir. Jaringan = piksel mentah (bukan
-        grid-24 create_vector). Topologi from->to eksplisit sehingga
-        panah yatim / terbalik tertangkap saat review.
+        Anchor at the side midpoint; one-bend Manhattan route; the arrow
+        head follows the last segment. The network uses raw pixels (not the
+        grid-24 create_vector scheme). The from->to topology is explicit so
+        orphaned or reversed arrows are caught during review.
         """
         nodes = self.doc["nodes"]
         a, b = nodes[str(from_id)], nodes[str(to_id)]
@@ -676,7 +732,7 @@ class FigcraftDocument:
             pts = [p1, p2] if y1 == y2 else [p1, (x2, y1), p2]
         else:
             pts = [p1, p2] if x1 == x2 else [p1, (x1, y2), p2]
-        # Kepala panah searah segmen terakhir.
+        # Arrow head follows the direction of the last segment.
         (qx, qy), (tx, ty) = pts[-2], pts[-1]
         head = 10.0
         dx = 1 if tx > qx else (-1 if tx < qx else 0)
@@ -713,7 +769,7 @@ class FigcraftDocument:
         return self.add_node(node, parent_id)
 
     # ------------------------------------------------------------------
-    # Builder v2.4 (kontrak SKILL §8): dialog, empty, error, ledger, pipe
+    # Builder v2.4 (SKILL §8 contract): dialog, empty, error, ledger, pipe
     # ------------------------------------------------------------------
     def build_dialog(
         self,
@@ -725,11 +781,11 @@ class FigcraftDocument:
         width: float = 1280.0,
         height: float = 960.0,
     ) -> int:
-        """Modal: scrim + kartu + header(tanya+Tutup) + body + footer(1 primer + Batal)."""
+        """Modal: scrim + card + header (question + Close) + body + footer (1 primary + Cancel)."""
         wrap = self.create_frame(name, parent_id, width, height,
                                  fill=None, sizing_h="fill", sizing_v="fill")
         scrim = self.create_frame("Scrim", wrap, width, height,
-                                 fill="#0a0a0d", sizing_h="fill", sizing_v="fill")
+                                 fill=CONTENT["scrim"], sizing_h="fill", sizing_v="fill")
         self.doc["nodes"][str(scrim)]["fills"][0]["opacity"] = 0.6
         dw, dh = 480.0, 300.0
         card = self.create_frame("Dialog", wrap, dw, dh,
@@ -748,7 +804,7 @@ class FigcraftDocument:
                          font_weight="SemiBold",
                          font_family=TOKENS["typography"]["font_brand"],
                          color=TOKENS["colors"]["ink_primary"])
-        self.build_button("Btn_Tutup", "Tutup", head, variant="ghost", size="sm")
+        self.build_button("Btn_Tutup", "Close", head, variant="ghost", size="sm")
         dbody = self.create_frame("DialogBody", card, dw, 120.0,
                                   layout_mode="vertical", gap=6.0,
                                   padding=(8.0, 16.0, 8.0, 16.0),
@@ -762,7 +818,7 @@ class FigcraftDocument:
                                  sizing_h="fill", sizing_v="fixed")
         self.build_button("Btn_Confirm", confirm_label, foot,
                           variant="primary", size="md")
-        self.build_button("Btn_Batal", "Batal", foot,
+        self.build_button("Btn_Batal", "Cancel", foot,
                           variant="ghost", size="md")
         return wrap
 
@@ -775,7 +831,7 @@ class FigcraftDocument:
         parent_id: int,
         width: float = 400.0,
     ) -> int:
-        """Keadaan kosong: judul + deskripsi + aksi. Tanpa ilustrasi."""
+        """Empty state: title + description + action. No illustration."""
         box = self.create_frame(name, parent_id, width, 180.0,
                                 fill=None, layout_mode="vertical", gap=12.0,
                                 padding=(24.0, 24.0, 24.0, 24.0),
@@ -796,7 +852,7 @@ class FigcraftDocument:
         fix: str,
         parent_id: int,
     ) -> int:
-        """Galat inline: badge danger + sebab + jalan keluar + [Coba lagi]."""
+        """Inline error: danger badge + cause + way out + [Try again]."""
         row = self.create_frame(name, parent_id, 420.0, 96.0,
                                 fill=TOKENS["colors"]["danger_subtle"],
                                 stroke=None, corner_radius=8.0,
@@ -804,7 +860,7 @@ class FigcraftDocument:
                                 padding=(12.0, 16.0, 12.0, 16.0),
                                 cross_align="center",
                                 sizing_h="fixed", sizing_v="fixed")
-        self.build_badge("Bdg_Err", "GALAT", row, tone="danger")
+        self.build_badge("Bdg_Err", "ERROR", row, tone="danger")
         col = self.create_frame("Col", row, 280.0, 72.0,
                                 layout_mode="vertical", gap=2.0,
                                 sizing_h="fill", sizing_v="hug")
@@ -813,7 +869,7 @@ class FigcraftDocument:
                          color=TOKENS["colors"]["ink_primary"])
         self.create_text("Fix", fix, col, font_size=12.0,
                          color=TOKENS["colors"]["ink_secondary"])
-        self.build_button("Btn_Retry", "Coba lagi", row,
+        self.build_button("Btn_Retry", "Try again", row,
                           variant="ghost", size="sm")
         return row
 
@@ -829,7 +885,7 @@ class FigcraftDocument:
         parent_id: int,
         state: str = "plain",  # "plain" | "cursor" | "selected"
     ) -> int:
-        """Baris tabel ledger: 6 kolom + separator 1px + state."""
+        """Ledger table row: 6 columns + 1px separator + state."""
         fill = TOKENS["colors"]["surface_card"]
         if state == "cursor":
             fill = TOKENS["colors"]["surface_active"]
@@ -958,14 +1014,14 @@ class FigcraftDocument:
             pad_y = 10.0
 
         if variant == "primary":
-            bg = TOKENS["colors"]["coral"]
+            bg = TOKENS["colors"]["action-primary"]
             stroke = None
-            text_color = TOKENS["colors"]["coral_fg"]  # --ks-accent-fg di atas coral
+            text_color = TOKENS["colors"]["action-primary-fg"]  # primary foreground on the primary surface
             font_weight = "SemiBold"
         elif variant == "danger":
             bg = TOKENS["colors"]["danger"]
             stroke = None
-            text_color = "#ffffff"
+            text_color = CONTENT["sheet"]
             font_weight = "SemiBold"
         elif variant == "ghost":
             bg = None
@@ -978,12 +1034,12 @@ class FigcraftDocument:
             text_color = TOKENS["colors"]["ink_primary"]
             font_weight = "Medium"
 
-        # R2: ukur label DULU supaya frame tersimpan jujur (headless tidak
-        # reflow; dulu width=100 fixed → ikon+label meluap +22px).
+        # R2: measure the label FIRST so the stored frame is honest (headless
+        # does not reflow; a fixed width=100 used to overflow icon+label by 22px).
         label_w = estimate_text_width(label, font_size, TOKENS["typography"]["font_ui"])
         icon_dim = 0.0
         if icon_name:
-            # DESIGN.md: ikon sm/md/lg = 16/20/24, ikut tier ukuran button.
+            # DESIGN.md: icon sm/md/lg = 16/20/24, follows the button size tier.
             icon_dim = TOKENS["sizes"]["icon_md"]
             if size == "sm":
                 icon_dim = TOKENS["sizes"]["icon_sm"]
@@ -1011,7 +1067,7 @@ class FigcraftDocument:
         if icon_name:
             paths = ICON_PATHS.get(icon_name)
             if paths is None:
-                print(f"figcraft_tool: ikon '{icon_name}' tak dikenal — slot kosong.",
+                print(f"figcraft_tool: unknown icon '{icon_name}' — empty slot.",
                       file=sys.stderr)
             else:
                 self.create_vector(
@@ -1035,66 +1091,65 @@ class FigcraftDocument:
         )
         return btn_id
 
+    # Legacy tone names stay as aliases; canonical semantic role names win.
+    BADGE_TONES = {
+        "data-technical": ("data-technical-soft", "data-technical"),
+        "cyan": ("data-technical-soft", "data-technical"),
+        "action-primary": ("action-primary-soft", "action-primary"),
+        "coral": ("action-primary-soft", "action-primary"),
+        "status-success": ("status-success-soft", "status-success"),
+        "ok": ("status-success-soft", "status-success"),
+        "status-warn": ("status-warn-soft", "status-warn"),
+        "warn": ("status-warn-soft", "status-warn"),
+        "status-danger": ("status-danger-soft", "status-danger"),
+        "danger": ("status-danger-soft", "status-danger"),
+        "status-info": ("status-info-soft", "status-info"),
+        "info": ("status-info-soft", "status-info"),
+        "muted": ("surface-2", "text-2"),
+    }
+
     def build_badge(
         self,
         name: str,
         text: str,
         parent_id: int,
-        tone: str = "cyan"  # "cyan" | "coral" | "ok" | "warn" | "danger" | "info" | "muted"
+        tone: str = "data-technical",
     ) -> int:
-        """Create a semantic badge/chip (quiet workbench: pill penuh, tanpa border)."""
-        bg_color = TOKENS["colors"]["surface_2"]
-        border_color = None  # Quiet workbench: badge/chip TIDAK memakai border.
-        text_color = TOKENS["colors"]["ink_secondary"]
-
-        if tone == "cyan":
-            bg_color = TOKENS["colors"]["cyan_subtle"]
-            text_color = TOKENS["colors"]["cyan"]
-        elif tone == "coral":
-            bg_color = TOKENS["colors"]["coral_subtle"]
-            text_color = TOKENS["colors"]["coral"]
-        elif tone == "ok":
-            bg_color = TOKENS["colors"]["success_subtle"]
-            text_color = TOKENS["colors"]["success"]
-        elif tone == "warn":
-            bg_color = TOKENS["colors"]["warning_subtle"]
-            text_color = TOKENS["colors"]["warning"]
-        elif tone == "danger":
-            bg_color = TOKENS["colors"]["danger_subtle"]
-            text_color = TOKENS["colors"]["danger"]
-        elif tone == "info":
-            bg_color = TOKENS["colors"]["info_subtle"]
-            text_color = TOKENS["colors"]["info"]
-
+        """Create a borderless semantic badge using manifest token roles."""
+        bg_role, fg_role = self.BADGE_TONES.get(
+            tone, self.BADGE_TONES["muted"]
+        )
         badge_id = self.create_frame(
             name=name,
             parent_id=parent_id,
-            width=50.0,
-            height=20.0,
-            fill=bg_color,
-            stroke=border_color,
-            corner_radius=TOKENS["radii"]["badge"],  # pil penuh 9999 (DESIGN.md)
+            width=float(COMPONENT.get("badge", {}).get("height", 20)) * 2.5,
+            height=float(COMPONENT.get("badge", {}).get("height", 20)),
+            fill=TOKENS["colors"][bg_role],
+            stroke=None,
+            corner_radius=TOKENS["radii"]["badge"],
             layout_mode="horizontal",
-            gap=4.0,
-            padding=(2.0, 8.0, 2.0, 8.0),
+            gap=SPACE["xs"] / 2.0,
+            # Keep vertical padding at zero: the badge height is the visual
+            # component height, and inner padding would clip the label.
+            padding=(0.0, SPACE["sm"], 0.0, SPACE["sm"]),
             main_align="center",
             cross_align="center",
             sizing_h="hug",
-            sizing_v="fixed"
+            sizing_v="fixed",
         )
-
         self.create_text(
             name="text",
             text=text,
             parent_id=badge_id,
-            font_size=TOKENS["typography"]["sizes"]["badge"],
+            font_size=float(COMPONENT.get("badge", {}).get("fontSize",
+                                                           TOKENS["typography"]["sizes"]["badge"])),
             font_weight="SemiBold",
             font_family=TOKENS["typography"]["font_mono"],
-            color=text_color
+            color=TOKENS["colors"][fg_role],
         )
         return badge_id
 
-    def build_window_bar(self, parent_id: int, title: str = "Kuron Studio — Manga Translator") -> int:
+    def build_window_bar(self, parent_id: int, title: str = DESIGN_DOC["name"]) -> int:
         """Build macOS-style top window header."""
         bar_id = self.create_frame(
             name="WindowBar",
@@ -1122,9 +1177,9 @@ class FigcraftDocument:
             sizing_h="hug",
             sizing_v="fixed"
         )
-        self.create_ellipse("close", traffic_id, 12.0, "#ff5f56")
-        self.create_ellipse("minimize", traffic_id, 12.0, "#ffbd2e")
-        self.create_ellipse("maximize", traffic_id, 12.0, "#27c93f")
+        self.create_ellipse("close", traffic_id, 12.0, CONTENT["traffic_close"])
+        self.create_ellipse("minimize", traffic_id, 12.0, CONTENT["traffic_min"])
+        self.create_ellipse("maximize", traffic_id, 12.0, CONTENT["traffic_max"])
 
         # Centered title
         self.create_text(
@@ -1188,9 +1243,9 @@ class FigcraftDocument:
             weight = "Regular"
             bg = None
             if state == "active":
-                color = TOKENS["colors"]["coral"]
+                color = TOKENS["colors"]["action-primary"]
                 weight = "Bold"
-                bg = TOKENS["colors"]["coral_subtle"]
+                bg = TOKENS["colors"]["action-primary-soft"]
             elif state == "ok":
                 color = TOKENS["colors"]["ink_primary"]
                 weight = "Medium"
@@ -1367,7 +1422,7 @@ def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40
             width=172.0,
             height=48.0,
             fill=TOKENS["colors"]["surface_active"] if is_active else TOKENS["colors"]["surface_card"],
-            stroke=TOKENS["colors"]["coral"] if is_active else TOKENS["colors"]["border"],
+            stroke=TOKENS["colors"]["action-primary"] if is_active else TOKENS["colors"]["border"],
             corner_radius=TOKENS["radii"]["control"],
             layout_mode="horizontal",
             gap=8.0,
@@ -1379,7 +1434,7 @@ def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40
         doc.create_rect("Thumb", page_card, 32.0, 36.0, fill=TOKENS["colors"]["surface_active"], corner_radius=3.0)
         col_text = doc.create_frame(f"Meta_{i}", page_card, width=100.0, height=36.0, layout_mode="vertical", gap=2.0, sizing_h="fill", sizing_v="hug")
         doc.create_text("Title", f"Page {i:02d}", col_text, font_size=11.0, font_weight="SemiBold", color=TOKENS["colors"]["ink_primary"])
-        doc.create_text("BubbleCount", f"{12 - i*2} bubbles", col_text, font_size=10.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["cyan"])
+        doc.create_text("BubbleCount", f"{12 - i*2} bubbles", col_text, font_size=10.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["data-technical"])
 
     # CENTER CANVAS (1fr): Dark Manga Preview with Coral Bubble Outlines
     center_canvas = doc.create_frame(
@@ -1403,25 +1458,25 @@ def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40
         parent_id=center_canvas,
         width=520.0,
         height=740.0,
-        fill="#f8f8fc",
-        stroke="#444455",
+        fill=CONTENT["paper"],
+        stroke=CONTENT["window_outline"],
         stroke_width=2.0,
         corner_radius=4.0,
         clip=True
     )
     
     # Manga comic panels inside page
-    doc.create_rect("PanelTop", manga_page, 480.0, 220.0, fill="#e8e8f0", stroke="#111118", stroke_width=2.0, x=20.0, y=20.0)
-    doc.create_rect("PanelMidLeft", manga_page, 230.0, 240.0, fill="#e2e2ec", stroke="#111118", stroke_width=2.0, x=20.0, y=250.0)
-    doc.create_rect("PanelMidRight", manga_page, 240.0, 240.0, fill="#dedee8", stroke="#111118", stroke_width=2.0, x=260.0, y=250.0)
-    doc.create_rect("PanelBottom", manga_page, 480.0, 210.0, fill="#e4e4ee", stroke="#111118", stroke_width=2.0, x=20.0, y=500.0)
+    doc.create_rect("PanelTop", manga_page, 480.0, 220.0, fill=CONTENT["paper_alt"], stroke=CONTENT["ink_panel"], stroke_width=2.0, x=20.0, y=20.0)
+    doc.create_rect("PanelMidLeft", manga_page, 230.0, 240.0, fill=CONTENT["paper_2"], stroke=CONTENT["ink_panel"], stroke_width=2.0, x=20.0, y=250.0)
+    doc.create_rect("PanelMidRight", manga_page, 240.0, 240.0, fill=CONTENT["paper_3"], stroke=CONTENT["ink_panel"], stroke_width=2.0, x=260.0, y=250.0)
+    doc.create_rect("PanelBottom", manga_page, 480.0, 210.0, fill=CONTENT["paper_4"], stroke=CONTENT["ink_panel"], stroke_width=2.0, x=20.0, y=500.0)
 
     # Active Detected Speech Bubbles (Highlighted in Coral)
-    bubble1 = doc.create_frame("Bubble_01", manga_page, 140.0, 90.0, x=50.0, y=60.0, fill="#ffffff", stroke=TOKENS["colors"]["coral"], stroke_width=2.0, corner_radius=20.0)
-    doc.create_text("Txt1", "なに？！本当にあいつが…", bubble1, font_size=11.0, font_weight="Bold", color="#111111", x=12.0, y=14.0, width=116.0, height=60.0)
+    bubble1 = doc.create_frame("Bubble_01", manga_page, 140.0, 90.0, x=50.0, y=60.0, fill=CONTENT["sheet"], stroke=TOKENS["colors"]["action-primary"], stroke_width=2.0, corner_radius=20.0)
+    doc.create_text("Txt1", "What?! Is it really them…", bubble1, font_size=11.0, font_weight="Bold", color=CONTENT["ink_soft"], x=12.0, y=14.0, width=116.0, height=60.0)
     
-    bubble2 = doc.create_frame("Bubble_02", manga_page, 130.0, 80.0, x=330.0, y=270.0, fill="#ffffff", stroke=TOKENS["colors"]["coral"], stroke_width=2.0, corner_radius=18.0)
-    doc.create_text("Txt2", "嘘じゃない。この目で見た。", bubble2, font_size=11.0, font_weight="Bold", color="#111111", x=12.0, y=14.0, width=106.0, height=52.0)
+    bubble2 = doc.create_frame("Bubble_02", manga_page, 130.0, 80.0, x=330.0, y=270.0, fill=CONTENT["sheet"], stroke=TOKENS["colors"]["action-primary"], stroke_width=2.0, corner_radius=18.0)
+    doc.create_text("Txt2", "嘘じゃない。この目で見た。", bubble2, font_size=11.0, font_weight="Bold", color=CONTENT["ink_soft"], x=12.0, y=14.0, width=106.0, height=52.0)
 
     # RIGHT INSPECTOR (268px): Translation cards & Fit bar
     right_inspector = doc.create_frame(
@@ -1437,22 +1492,22 @@ def build_workbench_screen(doc: FigcraftDocument, x: float = 40.0, y: float = 40
         sizing_h="fixed",
         sizing_v="fill"
     )
-    doc.create_text("InspectorTitle", "BUBBLE INSPECTOR #01", right_inspector, font_size=11.0, font_weight="Bold", font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["cyan"])
+    doc.create_text("InspectorTitle", "BUBBLE INSPECTOR #01", right_inspector, font_size=11.0, font_weight="Bold", font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["data-technical"])
 
     # Original Japanese Card
     card_orig = doc.create_frame("CardOriginal", right_inspector, 236.0, 90.0, fill=TOKENS["colors"]["surface_card"], stroke=TOKENS["colors"]["border"], corner_radius=TOKENS["radii"]["control"], layout_mode="vertical", gap=6.0, padding=(10.0, 12.0, 10.0, 12.0), sizing_h="fill", sizing_v="hug")
     doc.create_text("LblOrig", "ASLI (JA)", card_orig, font_size=10.0, font_weight="Bold", color=TOKENS["colors"]["ink_muted"])
-    doc.create_text("ValOrig", "なに？！本当にあいつが…", card_orig, font_size=12.0, color=TOKENS["colors"]["ink_primary"])
+    doc.create_text("ValOrig", "What?! Is it really them…", card_orig, font_size=12.0, color=TOKENS["colors"]["ink_primary"])
 
     # Indonesian Translation Card
-    card_trans = doc.create_frame("CardTrans", right_inspector, 236.0, 120.0, fill=TOKENS["colors"]["surface_card"], stroke=TOKENS["colors"]["coral"], stroke_width=1.5, corner_radius=TOKENS["radii"]["control"], layout_mode="vertical", gap=6.0, padding=(10.0, 12.0, 10.0, 12.0), sizing_h="fill", sizing_v="hug")
-    doc.create_text("LblTrans", "TERJEMAHAN (ID)", card_trans, font_size=10.0, font_weight="Bold", color=TOKENS["colors"]["coral"])
-    doc.create_text("ValTrans", "Apa?! Apa benar dia yang…", card_trans, font_size=13.0, font_weight="SemiBold", color=TOKENS["colors"]["ink_primary"])
-    doc.create_text("FitBar", "Fit: 94%  •  2 baris  •  Font: 14pt", card_trans, font_size=10.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["success"])
+    card_trans = doc.create_frame("CardTrans", right_inspector, 236.0, 120.0, fill=TOKENS["colors"]["surface_card"], stroke=TOKENS["colors"]["action-primary"], stroke_width=1.5, corner_radius=TOKENS["radii"]["control"], layout_mode="vertical", gap=6.0, padding=(10.0, 12.0, 10.0, 12.0), sizing_h="fill", sizing_v="hug")
+    doc.create_text("LblTrans", "TRANSLATION (EN)", card_trans, font_size=10.0, font_weight="Bold", color=TOKENS["colors"]["action-primary"])
+    doc.create_text("ValTrans", "What?! Is it really them…", card_trans, font_size=13.0, font_weight="SemiBold", color=TOKENS["colors"]["ink_primary"])
+    doc.create_text("FitBar", "Fit: 94%  •  2 lines  •  Font: 14pt", card_trans, font_size=10.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["success"])
 
     # Actions footer inside inspector
-    doc.build_button("BtnApply", "Terapkan Terjemahan", right_inspector, variant="primary", size="md")
-    doc.build_button("BtnInpaint", "Bersihkan Balon (Inpaint)", right_inspector, variant="default", size="md")
+    doc.build_button("BtnApply", "Apply translation", right_inspector, variant="primary", size="md")
+    doc.build_button("BtnInpaint", "Clean bubble (inpaint)", right_inspector, variant="default", size="md")
 
     return screen_id
 
@@ -1475,21 +1530,21 @@ def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.
     
     # Header
     doc.create_text("TokenHeader", "KURON STUDIO — DESIGN TOKENS & SYSTEM", frame_id, font_size=20.0, font_weight="Bold", color=TOKENS["colors"]["ink_primary"])
-    doc.create_text("TokenSub", "Sumber tunggal kebenaran visual. Ikuti token di bawah secara konsisten.", frame_id, font_size=13.0, color=TOKENS["colors"]["ink_secondary"])
+    doc.create_text("TokenSub", "Single source of visual truth. Follow the tokens below consistently.", frame_id, font_size=13.0, color=TOKENS["colors"]["ink_secondary"])
 
     # Colors Section Grid
-    doc.create_text("ColorSecTitle", "01 / PALETTE WARNA", frame_id, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["coral"])
+    doc.create_text("ColorSecTitle", "01 / COLOUR PALETTE", frame_id, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["action-primary"])
     color_row = doc.create_frame("ColorRow", frame_id, 1200.0, 90.0, layout_mode="horizontal", gap=16.0, sizing_h="fill", sizing_v="hug")
     
     swatches = [
-        ("Coral (Aksi Utama)", TOKENS["colors"]["coral"]),
-        ("Cyan (Info Teknis)", TOKENS["colors"]["cyan"]),
-        ("Surface (Latar)", TOKENS["colors"]["surface"]),
+        ("Primary action", TOKENS["colors"]["action-primary"]),
+        ("Technical info", TOKENS["colors"]["data-technical"]),
+        ("Surface (background)", TOKENS["colors"]["surface"]),
         ("Surface 2 (Panel)", TOKENS["colors"]["surface_2"]),
-        ("Card (Elevasi)", TOKENS["colors"]["surface_card"]),
-        ("Border (Garis)", TOKENS["colors"]["border"]),
-        ("Success (Sukses)", TOKENS["colors"]["success"]),
-        ("Danger (Error)", TOKENS["colors"]["danger"]),
+        ("Card (elevation)", TOKENS["colors"]["surface_card"]),
+        ("Border (line)", TOKENS["colors"]["border"]),
+        ("Success", TOKENS["colors"]["success"]),
+        ("Danger (error)", TOKENS["colors"]["danger"]),
     ]
     for name, hex_code in swatches:
         sw = doc.create_frame(f"Sw_{name}", color_row, 130.0, 80.0, fill=TOKENS["colors"]["surface_card"], stroke=TOKENS["colors"]["border"], corner_radius=6.0, layout_mode="vertical", gap=6.0, padding=(8.0, 8.0, 8.0, 8.0), sizing_h="fixed", sizing_v="fixed")
@@ -1498,12 +1553,12 @@ def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.
         doc.create_text("CHex", hex_code, sw, font_size=9.0, font_family=TOKENS["typography"]["font_mono"], color=TOKENS["colors"]["ink_muted"])
 
     # Components Preview Row
-    doc.create_text("CompSecTitle", "02 / KOMPONEN PRIMITIF", frame_id, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["cyan"])
+    doc.create_text("CompSecTitle", "02 / PRIMITIVE COMPONENTS", frame_id, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["data-technical"])
     comp_row = doc.create_frame("CompRow", frame_id, 1200.0, 80.0, fill=TOKENS["colors"]["surface_2"], stroke=TOKENS["colors"]["border"], corner_radius=8.0, layout_mode="horizontal", gap=20.0, padding=(16.0, 20.0, 16.0, 20.0), cross_align="center", sizing_h="fill", sizing_v="hug")
     
-    doc.build_button("BtnPri", "Aksi Coral (Primary)", comp_row, variant="primary", size="md")
-    doc.build_button("BtnDef", "Tombol Default", comp_row, variant="default", size="md")
-    doc.build_button("BtnDgr", "Hapus", comp_row, variant="danger", size="md")
+    doc.build_button("BtnPri", "Primary action", comp_row, variant="primary", size="md")
+    doc.build_button("BtnDef", "Default button", comp_row, variant="default", size="md")
+    doc.build_button("BtnDgr", "Delete", comp_row, variant="danger", size="md")
     doc.build_badge("BdgCyan", "12 BUBBLES", comp_row, tone="cyan")
     doc.build_badge("BdgCoral", "CH.12 ACTIVE", comp_row, tone="coral")
     doc.build_badge("BdgOk", "VERIFIED", comp_row, tone="ok")
@@ -1511,9 +1566,9 @@ def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.
     # Typography Scale
     doc.create_text("TypeSecTitle", "03 / TATA TIPOGRAFI", frame_id, font_size=13.0, font_weight="Bold", color=TOKENS["colors"]["ink_primary"])
     type_box = doc.create_frame("TypeBox", frame_id, 1200.0, 180.0, fill=TOKENS["colors"]["surface_2"], stroke=TOKENS["colors"]["border"], corner_radius=8.0, layout_mode="vertical", gap=12.0, padding=(16.0, 24.0, 16.0, 24.0), sizing_h="fill", sizing_v="hug")
-    doc.create_text("T1", "Space Grotesk Bold 20pt — Heading & Identitas Proyek", type_box, font_size=20.0, font_weight="Bold", font_family="Space Grotesk", color=TOKENS["colors"]["ink_primary"])
-    doc.create_text("T2", "Inter Medium 13pt — Standar UI label, tombol, dan teks instruksi", type_box, font_size=13.0, font_weight="Medium", font_family="Inter", color=TOKENS["colors"]["ink_secondary"])
-    doc.create_text("T3", "JetBrains Mono Regular 11pt — Tabular numbers, koordinat [x: 420, y: 180, w: 90], status 94%", type_box, font_size=11.0, font_family="JetBrains Mono", color=TOKENS["colors"]["cyan"])
+    doc.create_text("T1", "Space Grotesk Bold 20pt — Heading and project identity", type_box, font_size=20.0, font_weight="Bold", font_family="Space Grotesk", color=TOKENS["colors"]["ink_primary"])
+    doc.create_text("T2", "Inter Medium 13pt — UI labels, buttons, and instruction text", type_box, font_size=13.0, font_weight="Medium", font_family="Inter", color=TOKENS["colors"]["ink_secondary"])
+    doc.create_text("T3", "JetBrains Mono Regular 11pt — tabular numbers, coordinates [x: 420, y: 180, w: 90], status 94%", type_box, font_size=11.0, font_family="JetBrains Mono", color=TOKENS["colors"]["data-technical"])
 
     return frame_id
 
@@ -1521,49 +1576,51 @@ def build_tokens_screen(doc: FigcraftDocument, x: float = 1360.0, y: float = 40.
 # ---------------------------------------------------------------------------
 # QUIET-WORKBENCH LINTER (murni: tanpa I/O, warn-only)
 # ---------------------------------------------------------------------------
-# Warna konten yang sah tapi bukan token UI (kertas manga, tinta cetak,
-# traffic light macOS, overlay peredup). Validator tidak menandainya.
-_CONTENT_ALLOWLIST = frozenset({
-    "#ffffff",  # gelembung manga / teks label tombol
-    "#111111",  # tinta teks di atas kertas manga
-    "#111118",  # garis panel manga
-    "#444455",  # outline halaman manga
-    "#f8f8fc",  # kertas halaman manga
-    "#e8e8f0", "#e2e2ec", "#dedee8", "#e4e4ee",  # panel komik
-    "#ff5f56", "#ffbd2e", "#27c93f",  # traffic light macOS
-    "#000000",  # overlay peredup (alpha diabaikan saat banding)
-    "#0a0a0d",  # scrim dialog (kegelapan kanvas, bukan token)
-    "#121216",  # backdrop mock grid redup (layar 05/07)
-    "#16161a",  # label hex swatch gelap (layar 06, data demo)
-    "#111115",  # tinta cetak artwork manga (layar 03)
-    "#f0f0f5", "#ebebf2",  # kertas halaman manga (layar 03)
-    "#555566", "#666677", "#888899",  # tinta cetak/SFX artwork (layar 03)
-    "#f7f6f4", "#f1f0ed", "#e8e7e3", "#deddd8",  # swatch terang demo (06) & Light Mode surfaces
-    "#d8d7d1", "#55555f",  # swatch demo tambahan (06) & Light Mode selected/ring
-    "#dfdfd9", "#c4c3bc", "#7c7c86",  # Light Mode --ks-line, --ks-line-strong, --ks-text-3
-    "#c4342a", "#a62a21", "#fbe9e7",  # Light Mode --ks-accent, hover, soft
-    "#0b6e78", "#e0f2f4",  # Light Mode --ks-cyan, soft
-    "#1f7a4d", "#e4f3ea",  # Light Mode --ks-success, soft
-    "#8a5a00", "#fbf0dc",  # Light Mode --ks-warn, soft
-    "#b3261e", "#fde8e6",  # Light Mode --ks-danger, soft
-    # Kuron Mobile AppColors (Warm physical palette from colors_const.dart)
-    "#f1958e", "#e0827e", "#9d555b", "#1a1a1f",  # brand Coral, Muted, Dusty, Dark
-    "#1c1816", "#221e1c", "#2a2522", "#2e2926", "#4a3d36", "#d4ccc4", "#9e948c",  # dark theme
-    "#efe6dc", "#f5ede4", "#fcf7f0", "#faf3ec", "#d6c8bc", "#2e2722", "#7a6e66", "#c76a62",  # light theme
-    "#d48a6a", "#c8a06a",  # warm accent, read gold
-})
+# ---------------------------------------------------------------------------
+# LINTER CONFIG — loaded from DESIGN.md, never frozen in code
+# ---------------------------------------------------------------------------
+# Content colours (manga paper, print ink, system traffic lights, scrims) are
+# legitimate artwork values, not UI tokens. Their allowlists come from the
+# manifest's optional `lint` section so a project can extend them in one place.
+_CONTENT_ALLOWLIST = frozenset(
+    str(value).lower() for value in LINT_CONFIG.get("contentAllow", [])
+)
+_BORDER_CONTENT_ALLOW = frozenset(
+    str(value).lower() for value in LINT_CONFIG.get("borderContentAllow", [])
+)
+_FORBIDDEN_NEON = str(LINT_CONFIG.get("forbiddenNeon", "")).lower()
+_BORDER_ALLOWED_ROLES = frozenset(LINT_CONFIG.get("borderAllowedRoles", [
+    "line", "line-strong", "ring", "action-primary",
+]))
 
-# Border artwork (bukan chrome UI): garis panel/tinta manga.
-_BORDER_CONTENT_ALLOW = frozenset({
-    "#111115",  # tinta panel manga (layar 03)
-    "#22222a",  # tepi lembar manga (= surface, menyatu kertas, layar 03)
-})
+# Reverse lookup used by the design-to-code converter. It is derived from the
+# manifest for both themes, so no hex-to-role table is frozen in this file.
+CSS_ROLE_NAMES = {
+    "action-primary": "accent", "action-primary-hover": "accent-hover",
+    "action-primary-fg": "accent-fg", "action-primary-soft": "accent-soft",
+    "data-technical": "technical", "data-technical-soft": "technical-soft",
+    "raised": "surface-card", "surface-2": "surface-2",
+    "text": "ink", "text-2": "ink-2", "text-3": "ink-3",
+    "status-success": "success", "status-warn": "warn",
+    "status-danger": "danger", "status-info": "info",
+}
 
-_FORBIDDEN_NEON = "#00e5ff"  # DILARANG (patterns.md): pakai --ks-cyan #35e7f5.
+
+def _role_hex_map() -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for theme in ("light", "dark"):
+        for role, value in get_tokens(theme)["colors"].items():
+            if isinstance(value, str) and value.startswith("#"):
+                mapping[value.lower()] = CSS_ROLE_NAMES.get(role, role)
+    return mapping
+
+
+_ROLE_HEX_MAP = _role_hex_map()
+
 
 
 def _lint_hex(color: Dict[str, Any]) -> str:
-    """Ubah dict RGBA float FigCraft menjadi hex `#rrggbb` (abaikan alpha)."""
+    """Convert a FigCraft float RGBA dict to hex `#rrggbb` (ignore alpha)."""
     r = int(round(color.get("r", 0) * 255))
     g = int(round(color.get("g", 0) * 255))
     b = int(round(color.get("b", 0) * 255))
@@ -1571,7 +1628,7 @@ def _lint_hex(color: Dict[str, Any]) -> str:
 
 
 def _lint_paint_hexes(node: Dict[str, Any]) -> List[str]:
-    """Ambil semua hex fill+stroke yang terlihat pada satu node."""
+    """Collect all visible fill and stroke hex values on one node."""
     hexes: List[str] = []
     for key in ("fills", "strokes"):
         for paint in node.get(key, []) or []:
@@ -1584,45 +1641,49 @@ def _lint_paint_hexes(node: Dict[str, Any]) -> List[str]:
 
 
 def lint_design(doc: "FigcraftDocument") -> List[str]:
-    """Validasi quiet-workbench atas dokumen (murni, warn-only, tanpa I/O).
+    """Validate a document with pure, I/O-free, warn-only quiet-workbench rules.
 
-    Menerima objek FigcraftDocument maupun dict mentah hasil
-    `json.loads(document.json)` (mis. file .figcraft dari disk).
-    Memeriksa tiap node dan mengembalikan daftar string peringatan:
-    fill/stroke neon terlarang, badge/chip ber-border, border struktural
-    berwarna (S-01), token tak dikenal, lebih dari satu coral primer per
-    layar, teks cyan non-teknis (S-02), dan teks meluber (S-08).
+    Accepts a ``FigcraftDocument`` or a raw ``json.loads(document.json)`` dict.
+    Colours are compared against semantic roles resolved from DESIGN.md, never
+    against frozen literals in this file. Rules S-01/S-02/S-09 refer to the
+    ``action-primary`` and ``data-technical`` roles; S-08/S-10 detect overflow
+    and S-11 detects screen frames with clipping disabled.
     """
     warnings: List[str] = []
     raw = doc.doc if hasattr(doc, "doc") else doc
     nodes: Dict[str, Any] = raw.get("nodes", {})
-    known = {v.lower() for v in TOKENS["colors"].values()}
-    coral = TOKENS["colors"]["coral"].lower()
-    cyan = TOKENS["colors"]["cyan"].lower()
+    light = get_tokens("light")["colors"]
+    dark = TOKENS["colors"]
+    known = {str(v).lower() for v in list(dark.values()) + list(light.values())}
+    action = str(dark["action-primary"]).lower()
+    action_fg = str(dark["action-primary-fg"]).lower()
+    technical = str(dark["data-technical"]).lower()
+    border_roles = {
+        str(role_value).lower()
+        for role in _BORDER_ALLOWED_ROLES
+        for role_value in (dark.get(role), light.get(role))
+        if role_value
+    }
 
     def label(nid: Any, node: Dict[str, Any]) -> str:
         return f"[{nid}] {node.get('name', '?')}"
 
-    # 1-3: cek per node (neon, border badge, token tak dikenal, teks tubuh cyan).
+    # Per-node checks: forbidden neon, bordered badges, S-01 borders, unknown
+    # colours, S-02 technical-colour misuse, S-08 horizontal overflow.
     for nid, node in nodes.items():
         if not isinstance(node, dict) or node.get("type") not in (
             "frame", "rectangle", "ellipse", "text",
         ):
             continue
         hexes = _lint_paint_hexes(node)
-        name = str(node.get("name", ""))
-        lname = name.lower()
+        lname = str(node.get("name", "")).lower()
 
-        for h in hexes:
-            if h == _FORBIDDEN_NEON:
-                warnings.append(
-                    f"{label(nid, node)}: fill/stroke {_FORBIDDEN_NEON} "
-                    f"terlarang — pakai --ks-cyan {cyan}."
-                )
+        if _FORBIDDEN_NEON and _FORBIDDEN_NEON in hexes:
+            warnings.append(
+                f"{label(nid, node)}: fill/stroke {_FORBIDDEN_NEON} is forbidden — "
+                f"use the data-technical role ({technical})."
+            )
 
-        # R4: template memakai nama Bdg* (BdgCyan/BdgCoral/BdgOk) yang lolos
-        # cek substring lama — cocokkan juga prefix bdg + bentuk pil (radius
-        # 9999) yang memakai border.
         corners = node.get("corners", {}).get("radii", [0]) if isinstance(node.get("corners"), dict) else [0]
         is_pill_shape = (corners or [0])[0] >= 9000
         looks_like_badge = (
@@ -1631,118 +1692,104 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
         )
         if looks_like_badge and node.get("strokes"):
             warnings.append(
-                f"{label(nid, node)}: badge/chip memakai border — "
-                "quiet workbench: tanpa border, duduk di atas --ks-*-soft."
+                f"{label(nid, node)}: badge/chip uses a border — the quiet "
+                "workbench uses borderless soft surfaces instead."
             )
 
-        # S-01: border struktural hanya hairline netral. Frame/rectangle
-        # ber-stroke warna (cyan/success/warn/...) = border hijacking —
-        # dulu lolos karena cek badge hanya melihat nama node.
+        # S-01: structural borders are neutral hairlines. A coloured stroke
+        # on a frame/rectangle is border hijacking, even if the node name
+        # does not look like a component.
         if node.get("type") in ("frame", "rectangle") and node.get("strokes"):
-            _border_ok = {
-                TOKENS["colors"]["border"].lower(),
-                TOKENS["colors"].get("border_accent", "").lower(),
-                TOKENS["colors"].get("ring", "").lower(),  # fokus keyboard
-                coral,  # cincin seleksi aktif (dihitung terpisah)
-                "#dfdfd9", "#c4c3bc", "#55555f", "#16161a", "#ffffff", "#c4342a",  # Light Mode + Glass hairlines
-                "#4a3d36", "#d6c8bc",  # Kuron Mobile borders (darkBorder, lightBorder)
-            } | _BORDER_CONTENT_ALLOW
             for paint in node.get("strokes", []) or []:
                 color = paint.get("color")
                 if isinstance(color, dict) and paint.get("visible", True):
-                    _bh = _lint_hex(color)
-                    if _bh and _bh not in _border_ok:
+                    border_hex = _lint_hex(color)
+                    if border_hex and border_hex not in border_roles | _BORDER_CONTENT_ALLOW:
                         warnings.append(
-                            f"{label(nid, node)}: border {_bh} di luar "
-                            f"hairline netral — pakai --ks-line / "
-                            f"--ks-line-strong."
+                            f"{label(nid, node)}: border {border_hex} is outside "
+                            "the neutral line / line-strong roles — map it in DESIGN.md."
                         )
                         break
 
         unknown = sorted({h for h in hexes if h not in known and h not in _CONTENT_ALLOWLIST})
         if unknown:
             warnings.append(
-                f"{label(nid, node)}: warna di luar tabel token: "
+                f"{label(nid, node)}: colour outside the token table: "
                 f"{', '.join(unknown)}."
             )
 
         if node.get("type") == "text":
-            import re as _re_cyan
             style = node.get("style", {}) or {}
             chars = str(node.get("characters", "") or "")
-            if hexes and hexes[0] == cyan:
-                # S-02: cyan = data teknis SAJA. Mono saja tak cukup —
-                # judul sengaja diganti mono agar lolos dulu. Lolos bila pola
-                # teknis ([..], #id, a/b) atau pendek tanpa huruf kecil.
-                _stripped = chars.strip()
-                _is_mono = style.get("font_family") == TOKENS["typography"]["font_mono"]
-                _is_tech_pattern = bool(
-                    _re_cyan.fullmatch(r"\[[^\]]*\]", _stripped)
-                    or bool(_re_cyan.fullmatch(r"#\d+", _stripped))
-                    or bool(_re_cyan.fullmatch(r"\d+\s*/\s*\d+", _stripped))
+            if hexes and hexes[0] == technical:
+                # S-02: the data-technical role is for short technical data
+                # only. Monospace alone is not sufficient — a long heading
+                # styled as mono must still be flagged.
+                stripped = chars.strip()
+                is_mono = style.get("font_family") == TOKENS["typography"]["font_mono"]
+                is_tech_pattern = bool(
+                    re.fullmatch(r"\[[^\]]*\]", stripped)
+                    or re.fullmatch(r"#\d+", stripped)
+                    or re.fullmatch(r"\d+\s*/\s*\d+", stripped)
                 )
-                _is_short_code = (
-                    len(_stripped) <= 24
-                    and not _re_cyan.search(r"[a-z]", chars)
-                )
-                if not (_is_mono and (_is_tech_pattern or _is_short_code)):
+                is_short_code = len(stripped) <= 24 and not re.search(r"[a-z]", chars)
+                if not (is_mono and (is_tech_pattern or is_short_code)):
                     warnings.append(
-                        f"{label(nid, node)}: teks cyan bukan data teknis — "
-                        "cyan hanya untuk info teknis pendek "
-                        "(koordinat/ID/rasio/counter mono)."
+                        f"{label(nid, node)}: data-technical colour is used for "
+                        "non-technical text — reserve it for short mono "
+                        "coordinates, IDs, ratios, and counters."
                     )
-            # S-08: teks meluber dari ruang dalam induknya.
+            # S-08: text wider than the parent's inner width overflows.
             parent = nodes.get(str(node.get("parent", ""))) or {}
-            _pw = parent.get("width") or 0
-            _pad = (parent.get("layout") or {}).get("padding", [0, 0, 0, 0]) or [0, 0, 0, 0]
+            parent_width = parent.get("width") or 0
+            padding = (parent.get("layout") or {}).get("padding", [0, 0, 0, 0]) or [0, 0, 0, 0]
             try:
-                _inner = float(_pw) - float(_pad[1]) - float(_pad[3])
+                inner = float(parent_width) - float(padding[1]) - float(padding[3])
             except (IndexError, TypeError, ValueError):
-                _inner = float(_pw)
-            if _pw and node.get("width", 0) > _inner + 1:
+                inner = float(parent_width)
+            if parent_width and node.get("width", 0) > inner + 1:
                 warnings.append(
-                    f"{label(nid, node)}: teks {node.get('width', 0):.0f}px "
-                    f"meluber dari ruang dalam {_inner:.0f}px — "
-                    f"kecilkan max_w teks / perlebar kartu."
+                    f"{label(nid, node)}: text {node.get('width', 0):.0f}px "
+                    f"overflows the parent inner width {inner:.0f}px — reduce "
+                    "max_w or widen the card."
                 )
 
-    # 4 (R5+R9): semantik coral tiga peran — FILL coral pada SHAPE
-    # (frame/rect/ellipse) = permukaan aksi primer (maks 1 per layar);
-    # FILL coral pada TEXT = teks aksen (badge tone di atas soft-tint,
-    # header aktif — patterns.md §2/§5; wajar ≤3, warn bila lebih);
-    # STROKE coral = cincin seleksi aktif — wajar beberapa, warn bila >4.
-    # Cek lama hanya menghitung node bernama btn/* sehingga outline coral
-    # ganda lolos diam-diam.
-    # Pengecualian terdokumentasi: ProgressFill warnanya sudah di-gate
-    # pct==100 di template (coral HANYA saat 100% — patterns.md §2).
-    PROGRESS_EXEMPT = ("progressfill", "progressbar")
-    def coral_roles(nids: List[Any]) -> tuple:
+    # S-01 role counts: the action-primary role has three distinct meanings.
+    # A fill on a shape is the single primary action surface; a fill on text
+    # is an accent; a stroke is an active-selection ring.
+    progress_exempt = ("progressfill", "progressbar")
+
+    def action_roles(nids: List[Any]) -> tuple:
         surfaces, texts, rings = [], [], []
         for nid in nids:
             node = nodes.get(str(nid), {})
             if not isinstance(node, dict):
                 continue
-            if str(node.get("name", "")).lower().replace("_", "") in PROGRESS_EXEMPT:
+            if str(node.get("name", "")).lower().replace("_", "") in progress_exempt:
                 continue
             bucket = texts if node.get("type") == "text" else surfaces
             for paint in node.get("fills", []) or []:
                 color = paint.get("color")
                 if isinstance(color, dict) and paint.get("visible", True):
-                    if _lint_hex(color) == coral:
+                    if _lint_hex(color) == action:
                         bucket.append(label(nid, node))
             for paint in node.get("strokes", []) or []:
                 color = paint.get("color")
                 if isinstance(color, dict) and paint.get("visible", True):
-                    if _lint_hex(color) == coral:
+                    if _lint_hex(color) == action:
                         rings.append(label(nid, node))
         return surfaces, texts, rings
 
     def subtree(nid: Any) -> List[Any]:
-        out, stack = [], [nid]
-        while stack:
-            cur = stack.pop()
+        # Cut-loop guard: visited set plus a hard ceiling on visited nodes.
+        out, stack, seen = [], [nid], set()
+        while stack and len(seen) < 100000:
+            cur = str(stack.pop())
+            if cur in seen:
+                continue
+            seen.add(cur)
             out.append(cur)
-            node = nodes.get(str(cur), {})
+            node = nodes.get(cur, {})
             if isinstance(node, dict):
                 stack.extend(node.get("children", []) or [])
         return out
@@ -1755,56 +1802,64 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
             screen = nodes.get(str(screen_id), {})
             if not isinstance(screen, dict):
                 continue
-            surfaces, texts, rings = coral_roles(subtree(screen_id))
-            if len(surfaces) > 1:
+            screen_name = screen.get("name", screen_id)
+            # Documentation canvases (component libraries, token guides) are
+            # exempt from the one-primary-action rule per SKILL §5.
+            is_docs_canvas = any(
+                word in str(screen_name).lower()
+                for word in ("component", "token", "guide", "palette")
+            )
+            surfaces, texts, rings = action_roles(subtree(screen_id))
+            if len(surfaces) > 1 and not is_docs_canvas:
                 warnings.append(
-                    f"Layar '{screen.get('name', screen_id)}': "
-                    f"{len(surfaces)} permukaan coral ({', '.join(surfaces)}) — "
-                    "coral fill shape hanya untuk SATU aksi utama per layar."
+                    f"Screen '{screen_name}': {len(surfaces)} action-primary "
+                    f"surfaces ({', '.join(surfaces)}) — only one primary "
+                    "action fill is allowed per screen."
                 )
-            if len(texts) > 3:
+            if len(texts) > 3 and not is_docs_canvas:
                 warnings.append(
-                    f"Layar '{screen.get('name', screen_id)}': "
-                    f"{len(texts)} teks coral ({', '.join(texts)}) — "
-                    "teks aksen coral maks 3 (badge tone + header aktif)."
+                    f"Screen '{screen_name}': {len(texts)} action-primary "
+                    f"text nodes ({', '.join(texts)}) — at most three accent "
+                    "text nodes (badge tone + active heading)."
                 )
-            if len(rings) > 4:
+            if len(rings) > 4 and not is_docs_canvas:
                 warnings.append(
-                    f"Layar '{screen.get('name', screen_id)}': "
-                    f"{len(rings)} stroke coral ({', '.join(rings)}) — "
-                    "cincin seleksi aktif wajar beberapa; >4 curigai aksen ganda."
+                    f"Screen '{screen_name}': {len(rings)} action-primary "
+                    f"strokes ({', '.join(rings)}) — several selection rings "
+                    "are fine, but more than four suggests duplicate accents."
+                )
+            if (screen.get("type") == "frame" and (screen.get("width") or 0) >= 1000
+                    and screen.get("clip") is False):
+                warnings.append(
+                    f"Screen '{screen_name}': clip is false — enable clipping "
+                    "so child content cannot leak past the rounded frame."
                 )
 
-    # 5b (S-10): teks tak boleh meluber vertikal dari induk fixed.
-    # Kelas bug nyata 2026-11-08: baris terakhir kartu baris-list
-    # (104,5+14,9=119,4) melebihi kartu (115) — kepotong 4px.
+    # S-10: text must not overflow the bottom of a fixed-height parent.
     for nid, node in nodes.items():
-        if not isinstance(node, dict) or node.get('type') != 'text':
+        if not isinstance(node, dict) or node.get("type") != "text":
             continue
-        parent = nodes.get(str(node.get('parent', '')), {})
-        if not isinstance(parent, dict) or parent.get('type') not in (
-            'frame', 'rectangle', 'ellipse',
+        parent = nodes.get(str(node.get("parent", "")), {})
+        if not isinstance(parent, dict) or parent.get("type") not in (
+            "frame", "rectangle", "ellipse",
         ):
             continue
-        if (parent.get('child_layout', {}) or {}).get('sizing_v') == 'hug':
-            continue  # induk hug ikut membesar — bukan meluber
-        pad = (parent.get('layout') or {}).get('padding', [0, 0, 0, 0]) or [0, 0, 0, 0]
+        if (parent.get("child_layout", {}) or {}).get("sizing_v") == "hug":
+            continue  # a hug parent grows with its content
+        padding = (parent.get("layout") or {}).get("padding", [0, 0, 0, 0]) or [0, 0, 0, 0]
         try:
-            limit = float(parent.get('height', 0)) - float(pad[2])
-            bottom = float(node.get('transform', [0]*6)[5]) + float(node.get('height', 0))
+            limit = float(parent.get("height", 0)) - float(padding[2])
+            bottom = float(node.get("transform", [0] * 6)[5]) + float(node.get("height", 0))
         except (IndexError, TypeError, ValueError):
             continue
         if bottom > limit + 1.0:
             warnings.append(
-                f"{label(nid, node)}: teks meluber vertikal "
-                f"({bottom:.0f}px > ruang dalam {limit:.0f}px) — "
-                f"naikkan height induk / jadikan hug."
+                f"{label(nid, node)}: text overflows vertically "
+                f"({bottom:.0f}px > inner height {limit:.0f}px) — increase "
+                "the parent height or switch it to hug."
             )
 
-    # 5 (S-09): ikon di atas permukaan coral HARUS sewarna teks tombol
-    # (coral_fg, bukan putih). Satu kelas bug: 10 ikon vektor putih di
-    # atas tombol coral ditegur 2026-11-08 (teksnya sudah coral_fg).
-    coral_fg = TOKENS["colors"]["coral_fg"].lower()
+    # S-09: an icon on an action-primary surface must use action-primary-fg.
     for nid, node in nodes.items():
         if not isinstance(node, dict) or node.get("type") not in (
             "frame", "rectangle", "ellipse",
@@ -1812,7 +1867,7 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
             continue
         fills = node.get("fills", []) or []
         if not any(
-            isinstance(p.get("color"), dict) and _lint_hex(p["color"]) == coral
+            isinstance(p.get("color"), dict) and _lint_hex(p["color"]) == action
             for p in fills if isinstance(p, dict)
         ):
             continue
@@ -1823,14 +1878,20 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
             for paint in vec.get("strokes", []) or []:
                 color = paint.get("color")
                 if (isinstance(color, dict) and paint.get("visible", True)
-                        and _lint_hex(color) not in (coral_fg, coral)):
+                        and _lint_hex(color) not in (action_fg, action)):
                     warnings.append(
-                        f"{label(sub, vec)}: ikon di atas permukaan coral "
-                        f"berwarna {_lint_hex(color)} — harus {coral_fg} "
-                        "(coral_fg, samakan teks tombol)."
+                        f"{label(sub, vec)}: icon on an action-primary surface "
+                        f"uses {_lint_hex(color)} — use action-primary-fg "
+                        f"({action_fg}) to match the button label."
                     )
 
     return warnings
+
+
+def component_first(doc: "FigcraftDocument", component_id: int, parent_id: int,
+                    **overrides: Any) -> Optional[int]:
+    """Component-first rule: reuse an existing component via duplicate/refine."""
+    return doc.duplicate_node(component_id, parent_id=parent_id, overrides=overrides or None)
 
 
 # ---------------------------------------------------------------------------
@@ -1847,23 +1908,9 @@ def node_to_svelte(doc: FigcraftDocument, node_id: int, indent_level: int = 0) -
     ntype = node.get("type", "").lower()
     name = node.get("name", "")
 
-    # Helper: map color to token
+    # Colour classes come from the manifest-derived role reverse map.
     def map_color(hex_str: str) -> str:
-        h = hex_str.lower()
-        if h in ["#0d0d10"]: return "bg"
-        if h in ["#141418", "#121215", "#121214"]: return "surface"
-        if h in ["#1a1a20", "#18181f"]: return "surface-2"
-        if h in ["#22222a", "#212129"]: return "surface-card"
-        if h in ["#2a2a33"]: return "hover"
-        if h in ["#26262e", "#2e2e38", "#23232c"]: return "line"
-        if h in ["#35353f", "#3a3a48"]: return "line-strong"
-        if h in ["#ff6b5a", "#ff5f57", "#ff5f56"]: return "coral"
-        if h in ["#9a9aa8"]: return "ring"
-        if h in ["#34343f"]: return "selected"
-        if h in ["#35e7f5"]: return "cyan"
-        if h in ["#22c55e", "#27c93f"]: return "success"
-        if h in ["#ef4444"]: return "danger"
-        return f"[{hex_str}]"
+        return _ROLE_HEX_MAP.get(hex_str.lower(), f"[{hex_str}]")
 
     # Helper: extract hex fill
     fills = node.get("fills", [])
@@ -1901,12 +1948,7 @@ def node_to_svelte(doc: FigcraftDocument, node_id: int, indent_level: int = 0) -
         c = fills[0].get("color", {}) if fills else {}
         r, g, b = int(c.get("r", 1)*255), int(c.get("g", 1)*255), int(c.get("b", 1)*255)
         hex_val = f"#{r:02x}{g:02x}{b:02x}"
-        text_color_class = "text-ink"
-        if hex_val in ["#ff6b5a", "#ff5f57"]: text_color_class = "text-coral"
-        elif hex_val == "#35e7f5": text_color_class = "text-cyan"
-        elif hex_val in ["#a0a0b2", "#9e9eb0"]: text_color_class = "text-ink-2"
-        elif hex_val in ["#68687a", "#636375"]: text_color_class = "text-ink-3"
-        elif hex_val == "#22c55e": text_color_class = "text-success"
+        text_color_class = "text-" + _ROLE_HEX_MAP.get(hex_val.lower(), "ink")
 
         classes = [f"text-[{int(fsize)}px]", text_color_class]
         if fweight in ["Bold", "SemiBold"]: classes.append("font-semibold")
