@@ -179,6 +179,14 @@ preserves later pages untouched:
 | `01_Components` | Reusable bases and variants (`Button`, `Badge`, `NavItem`, `Card`, `Input`, `Row`, …) | Structured for direct duplication |
 | `02_Screens` | Final screens | Repeated items are **copies** of nodes from `01_Components` |
 
+**Descriptive labels and card fit (mandatory):** every board, screen,
+component, foundation item, and reference section has a descriptive English
+name and, where visible, an English caption — never an empty, `Untitled`,
+`text`, or other generic placeholder. Wrapper cards contain their children
+with clean padding and size around their content; no child escapes its parent
+card unless the item is intentionally unboxed. `audit_render.py` enforces both
+on every page with rules S-15 (labels) and S-16 (card containment/fit).
+
 **Smart reuse rule — if a component already exists, copy it; do not rebuild
 it.** Before creating anything, call `ensure_board()` / `find_or_reuse_component()`
 from `figcraft_tool.py`. If the board or component is already present, reuse it
@@ -195,9 +203,11 @@ rebuilding it.
 
 `audit_render.py` audits each top-level board on every page independently and
 scopes contrast and layout checks to that board, so neither neighbouring
-boards nor other pages can produce false positives. Use `--page-index` or
-`--page-name` to filter the audit or the terminal's `frames` / `export-all`
-commands to one page.
+boards nor other pages can produce false positives. It also verifies
+descriptive English labels (S-15) and card containment/fit (S-16) on all pages,
+and its PASS line reports how many labels and cards were checked. Use
+`--page-index` or `--page-name` to filter the audit or the terminal's `frames`
+/ `export-all` commands to one page.
 
 **Engine honesty:** the live FigCraft canvas may display `pages[0]` by default
 and its `document.inspect` output can truncate on very large documents. That

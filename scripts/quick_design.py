@@ -10,6 +10,8 @@ own pages; the legacy ``three-board`` preset keeps them adjacent on the selected
 page of ``pages[0..N]``. Screens duplicate existing components across pages
 instead of rebuilding them.
 
+Every generated node gets a descriptive English name and visible label, and
+wrapper cards fit their content with proportional padding (audit rules S-15/S-16).
 All network operations use timeouts; the preview worker is always terminated.
 """
 
@@ -393,7 +395,8 @@ def retarget_duplicate_label(doc: FigcraftDocument, node_id: Optional[int],
     root = doc.doc["nodes"].get(str(node_id), {})
     for child_id in root.get("children", []) or []:
         child = doc.doc["nodes"].get(str(child_id), {})
-        if child.get("type") != "text" or child.get("name") not in ("label", "text"):
+        if child.get("type") != "text" or child.get("name") not in (
+                "label", "text", "BadgeLabel"):
             continue
         child["characters"] = label
         # The node keeps its hug sizing; save-time reflow measures the new copy

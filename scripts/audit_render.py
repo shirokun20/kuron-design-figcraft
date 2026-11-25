@@ -3,8 +3,9 @@
 
 Numeric evidence replaces "the PNG looks right": canvas utilisation, text
 overflow, child content escaping frame bounds, disabled clipping, connector
-topology, dot semantics, and WCAG contrast in **both** themes. Every check
-cites the rule ID it enforces.
+topology, dot semantics, WCAG contrast in **both** themes, descriptive English
+labels (S-15), and wrapper-card containment/fit (S-16). Every check cites the
+rule ID it enforces.
 
 Every top-level frame on every page (``pages[0..N]``) is audited as its own
 board. Traversal, contrast ancestry, and layout checks are scoped to that
@@ -20,6 +21,7 @@ Exit 0 = all checks pass; 1 = at least one failure.
 import argparse
 import json
 import os
+import re
 import sys
 import zipfile
 from typing import Any, Dict, List, Optional
@@ -31,6 +33,13 @@ from figcraft_tool import _lint_hex  # noqa: E402
 
 DESIGN = load_design()
 FAIL: List[str] = []
+SUMMARY: Dict[str, int] = {}
+# Names such as "frame", "Untitled 2", or "text" are not descriptive labels.
+GENERIC_NAME = re.compile(
+    r"^(untitled|frame|rectangle|ellipse|text|group|component|node|layer|"
+    r"shape|object|item|section)(\s+\d+)?$", re.IGNORECASE)
+MIN_CARD_DIMENSION = 60.0
+MIN_CARD_FILL = 0.30
 MAX_TREE_NODES = 100000
 MAX_ANCESTOR_STEPS = 64
 MAX_BOARDS = 256
@@ -194,6 +203,99 @@ def audit_contract_contrast() -> None:
                         thresholds["required"]))
 
 
+def is_descriptive_name(name: Any) -> bool:
+    """Whether a node name or visible caption is a descriptive English label."""
+    value = str(name or "").strip()
+    if not value or GENERIC_NAME.match(value):
+        return False
+    if any(ord(char) > 127 for char in value):
+        return False
+    return any(char.isascii() and char.isalpha() for char in value)
+
+
+def corner_radius(node: Dict[str, Any]) -> float:
+    """Read the first corner radius from either schema spelling."""
+    radii = (node.get("corners") or {}).get("radii") or []
+    if radii:
+        try:
+            return float(radii[0])
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        return float(node.get("cornerRadius") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def is_wrapper_card(node: Dict[str, Any]) -> bool:
+    """A filled, rounded rectangular container that wraps child content.
+
+    Circular icon badges are excluded: their small glyphs are intentionally
+    centred with wide visual padding, not card content that should fill them.
+    """
+    if node.get("type") != "frame" or not node.get("children"):
+        return False
+    if first_paint_hex(node) is None:
+        return False
+    width, height = float(node.get("width", 0)), float(node.get("height", 0))
+    if min(width, height) < MIN_CARD_DIMENSION:
+        return False
+    return corner_radius(node) < min(width, height) / 2.0 - 1.0
+
+
+def audit_labels(nodes: Dict[str, Any], screen_id: Any, root_id: Any,
+                 label: str) -> None:
+    """Rule S-15: every board item needs a descriptive English name/label."""
+    for node_id in subtree(nodes, screen_id):
+        node = nodes.get(node_id)
+        if not isinstance(node, dict) or node.get("type") == "page":
+            continue
+        name = node.get("name")
+        SUMMARY["labels"] += 1
+        if not is_descriptive_name(name):
+            note(label, "S-15", "node %s has a non-descriptive name %r"
+                 % (node_id, name))
+        if node.get("type") == "text":
+            characters = str(node.get("characters") or "").strip()
+            # Decorative glyphs ("—", "•") are not labels; only text that
+            # reads as a word needs a descriptive English caption.
+            if any(char.isascii() and char.isalpha() for char in characters) \
+                    and not is_descriptive_name(characters):
+                note(label, "S-15", "text %s has a non-descriptive label %r"
+                     % (node_id, characters))
+
+
+def audit_card_fit(nodes: Dict[str, Any], screen_id: Any, root_id: Any,
+                   label: str) -> None:
+    """Rule S-16: wrapper cards contain their children and fit their content."""
+    for node_id in subtree(nodes, screen_id):
+        node = nodes.get(node_id)
+        if not isinstance(node, dict) or not is_wrapper_card(node):
+            continue
+        width, height = float(node.get("width", 0)), float(node.get("height", 0))
+        boxes = []
+        for child_id in node.get("children", []) or []:
+            child = nodes.get(str(child_id))
+            if isinstance(child, dict):
+                boxes.append(frame_box(child))
+        if not boxes:
+            continue
+        SUMMARY["cards"] += 1
+        x0, y0 = min(box[0] for box in boxes), min(box[1] for box in boxes)
+        x1 = max(box[0] + box[2] for box in boxes)
+        y1 = max(box[1] + box[3] for box in boxes)
+        escape = max(-x0, -y0, x1 - width, y1 - height)
+        if escape > 1.0:
+            note(label, "S-16", "card '%s' containment: child escapes bounds "
+                 "by %.0fpx" % (node.get("name"), escape))
+            continue
+        fill = max(0.0, x1 - x0) * max(0.0, y1 - y0) / (width * height)
+        if fill + 1e-9 < MIN_CARD_FILL:
+            note(label, "S-16", "card '%s' fit: content occupies %.0f%% of the "
+                 "card (needs >= %d%%)" % (node.get("name"), fill * 100,
+                                          MIN_CARD_FILL * 100))
+
+
 def audit_screen(nodes: Dict[str, Any], screen_id: Any,
                  root_id: Any = None,
                  page_label: Optional[str] = None) -> None:
@@ -202,6 +304,8 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
     screen = nodes[str(screen_id)]
     name = screen.get("name", screen_id)
     label = ("%s / %s" % (page_label, name)) if page_label else name
+    audit_labels(nodes, screen_id, board_root, label)
+    audit_card_fit(nodes, screen_id, board_root, label)
     x0, y0, width, height = frame_box(screen)
     if not width or not height:
         return
@@ -371,6 +475,8 @@ def audit_file(path: str, screen_id: Optional[str] = None,
                page_name: Optional[str] = None) -> List[str]:
     """Audit every board on every page of a .figcraft file."""
     FAIL.clear()
+    SUMMARY.clear()
+    SUMMARY.update({"labels": 0, "cards": 0})
     audit_contract_contrast()
     with zipfile.ZipFile(path) as archive:
         document = json.load(archive.open("document.json"))
@@ -412,6 +518,12 @@ def main() -> None:
             print(" -", failure)
         sys.exit(1)
     print("PASS: all screens passed the render audit.")
+    print("  S-15 labels: %d/%d descriptive English names and captions checked."
+          % (SUMMARY.get("labels", 0) - len([f for f in failures if "S-15" in f]),
+             SUMMARY.get("labels", 0)))
+    print("  S-16 containment/fit: %d/%d wrapper cards fit their content."
+          % (SUMMARY.get("cards", 0) - len([f for f in failures if "S-16" in f]),
+             SUMMARY.get("cards", 0)))
 
 
 if __name__ == "__main__":

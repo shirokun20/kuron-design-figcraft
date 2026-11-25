@@ -184,5 +184,89 @@ class PageProjectionTests(unittest.TestCase):
             os.remove(path)
 
 
+class DescriptiveLabelAuditTests(unittest.TestCase):
+    def two_page_doc(self):
+        doc = FigcraftDocument("label-audit")
+        ids = doc.ensure_named_pages(["00_Foundations", "01_Components"])
+        for index, (page_id, name) in enumerate(zip(ids, (
+                "00_Foundations", "01_Components"))):
+            board = ft.ensure_board(
+                doc, name, width=900, height=700,
+                fill=TOKENS["colors"]["bg"], page_index=index)
+            doc.create_rect("VisibleContent", board, 700, 500,
+                            x=50, y=50, fill=TOKENS["colors"]["raised"])
+        return doc
+
+    def test_descriptive_labels_pass_across_all_pages(self):
+        path = save_temp(self.two_page_doc())
+        try:
+            failures = audit_render.audit_file(path)
+            self.assertEqual([f for f in failures if "S-15" in f], [], failures)
+            self.assertGreater(audit_render.SUMMARY["labels"], 0)
+        finally:
+            os.remove(path)
+
+    def test_generic_name_and_caption_are_detected_on_later_page(self):
+        doc = self.two_page_doc()
+        page_id = doc.resolve_page(page_name="01_Components")
+        board_id = doc.doc["nodes"][str(page_id)]["children"][0]
+        doc.create_frame("Untitled 2", board_id, 100, 40, x=60, y=60)
+        doc.create_text("Caption", "text", board_id, font_size=11,
+                        color=TOKENS["colors"]["text-2"], x=60, y=120, width=100)
+        path = save_temp(doc)
+        try:
+            failures = audit_render.audit_file(path)
+        finally:
+            os.remove(path)
+        labels = [f for f in failures if "S-15" in f]
+        self.assertTrue(any("Untitled 2" in f for f in labels), labels)
+        self.assertTrue(any("non-descriptive label" in f for f in labels), labels)
+        self.assertTrue(all("01_Components" in f for f in labels), labels)
+
+
+class CardFitAuditTests(unittest.TestCase):
+    def doc_with_card(self, child_x, child_y, child_w, child_h):
+        doc = FigcraftDocument("card-fit-audit")
+        ids = doc.ensure_named_pages(["00_Foundations", "01_Components"])
+        board = ft.ensure_board(
+            doc, "01_Components", width=900, height=700,
+            fill=TOKENS["colors"]["bg"], page_index=1)
+        doc.create_rect("VisibleContent", board, 700, 500,
+                        x=50, y=50, fill=TOKENS["colors"]["raised"])
+        card = doc.create_frame("SpecimenCard", board, 200, 200,
+                                fill=TOKENS["colors"]["surface-2"],
+                                corner_radius=20, x=80, y=80)
+        doc.create_rect("CardContent", card, child_w, child_h,
+                        x=child_x, y=child_y, fill=TOKENS["colors"]["raised"])
+        return doc
+
+    def test_well_fitted_card_passes(self):
+        path = save_temp(self.doc_with_card(30, 30, 140, 140))
+        try:
+            failures = audit_render.audit_file(path)
+            self.assertEqual([f for f in failures if "S-16" in f], [], failures)
+            self.assertGreater(audit_render.SUMMARY["cards"], 0)
+        finally:
+            os.remove(path)
+
+    def test_overflow_and_oversized_card_are_detected_on_later_page(self):
+        path = save_temp(self.doc_with_card(180, 180, 60, 60))
+        try:
+            escaped = [f for f in audit_render.audit_file(path) if "S-16" in f]
+        finally:
+            os.remove(path)
+        self.assertTrue(any("containment" in f and "SpecimenCard" in f
+                            for f in escaped), escaped)
+        self.assertTrue(all("01_Components" in f for f in escaped), escaped)
+
+        path = save_temp(self.doc_with_card(10, 10, 10, 10))
+        try:
+            oversized = [f for f in audit_render.audit_file(path) if "S-16" in f]
+        finally:
+            os.remove(path)
+        self.assertTrue(any("fit" in f and "SpecimenCard" in f
+                            for f in oversized), oversized)
+
+
 if __name__ == "__main__":
     unittest.main()

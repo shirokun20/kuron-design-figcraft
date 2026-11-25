@@ -104,7 +104,9 @@ optional exhibits such as `01_Reference` at `pages[3]`. Use
 `quick_design.py --preset three-pages` or `doc.ensure_named_pages([...])`.
 The legacy `--preset three-board --page-index N` / `--page-name NAME` keeps the
 three adjacent frames separated by `BOARD_GAP` on one page. `audit_render.py`
-checks every board on every page independently.
+checks every board on every page independently, including descriptive English
+labels (S-15) and wrapper-card containment/fit (S-16): card children stay
+inside their parent with proportional padding and cards size around content.
 
 ---
 

@@ -4,6 +4,8 @@ FigCraft CLI & Automation Toolkit
 Provides live control over FigCraft.app (via JSON-RPC TCP socket)
 and offline programmatic manipulation of .figcraft design files.
 Designed for Antigravity, Claude Code, Muse Code, and OMP.
+Generated nodes always get descriptive English names (never "text", "Untitled",
+or empty labels); wrapper cards fit their visible content with clean padding.
 """
 
 import sys
@@ -1351,7 +1353,7 @@ class FigcraftDocument:
             sizing_v="fixed",
         )
         self.create_text(
-            name="text",
+            name="BadgeLabel",
             text=text,
             parent_id=badge_id,
             font_size=float(COMPONENT.get("badge", {}).get("fontSize",

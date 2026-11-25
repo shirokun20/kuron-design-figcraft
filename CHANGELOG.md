@@ -46,8 +46,14 @@ One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
   `--page-name`; a non-zero page is exported through a read-only temporary
   projection that promotes it to `pages[0]` for the live engine and restores
   the original file, which is never written.
+- **Descriptive labels and card fit:** all generated nodes use descriptive
+  English names (`build_badge` no longer emits a node named `text`), component
+  specimens in stereo carry visible English captions, and `audit_render.py`
+  adds S-15 (label completeness) and S-16 (card containment/fit) across every
+  page with counts in its PASS output.
 - **Tests:** `test_stage5_remediation.py` covers the swatch stroke, two-column
-  coverage, dedicated pages and cross-page reuse, and no-mutation projection.
+  coverage, dedicated pages and cross-page reuse, no-mutation projection, and
+  positive/negative label and card-fit cases on later pages.
 - **Version lock:** `VERSION`, `SKILL.md` metadata, `HARNESS_VERSION`, and
   `tests/test_package_hygiene.py` all move to `3.2.0`.
 

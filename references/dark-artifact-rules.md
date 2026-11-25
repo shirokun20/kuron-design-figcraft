@@ -164,6 +164,9 @@ Four assumptions proven wrong by render evidence — do not repeat them:
    `pages[0]` for the engine and restores the original file afterwards.
 5. **`open_file` is cached per path.** Headless edit then reopen the same path =
    stale. Force a reload: open another file first, then reopen the target.
+6. **Names carry meaning.** S-15 rejects empty, generic, or non-English node
+   names and captions; S-16 rejects card children that escape their parent or
+   cards padded far beyond their content. Both run on every page.
 
 ---
 
