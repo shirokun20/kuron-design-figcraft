@@ -16,7 +16,7 @@ import time
 import argparse
 import re
 import copy
-from typing import Dict, List, Optional, Any, Union, Tuple
+from typing import Callable, Dict, List, Optional, Any, Union, Tuple
 
 # Make sibling modules (e.g. build_artistic_flow) importable from any cwd.
 _SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -48,6 +48,11 @@ SPACE = resolve(DESIGN_DOC["tokens"]["semantic"]["space"], DESIGN_DOC, DESIGN_TH
 TYPE = resolve(DESIGN_DOC["tokens"]["semantic"]["type"], DESIGN_DOC, DESIGN_THEME)
 COMPONENT = resolve(DESIGN_DOC["tokens"]["component"], DESIGN_DOC, DESIGN_THEME)
 GEOMETRY = DESIGN_DOC.get("geometry", {})
+
+# Hard ceiling for the unique-id probe and for board/component searches. These
+# cut-loop guards keep a malformed or cyclic document from hanging a build.
+MAX_ID_PROBE = 100000
+MAX_SEARCH_NODES = 100000
 
 
 def get_tokens(theme: Optional[str] = None) -> Dict[str, Any]:
@@ -246,9 +251,21 @@ class FigcraftDocument:
         self.file_path = path
 
     def alloc_id(self) -> int:
-        cur = self.doc.get("next_id", 10)
-        self.doc["next_id"] = cur + 1
-        return cur
+        """Allocate a node id that is provably unused in this document.
+
+        A loaded file can carry a stale ``next_id``. Probing against the real
+        node map with a bounded scan guarantees fresh ids for duplicated
+        subtrees, so a rebuilt board can never collide with an existing node.
+        """
+        cur = int(self.doc.get("next_id", 10))
+        used = self.doc.get("nodes", {})
+        for _ in range(MAX_ID_PROBE):  # cut-loop guard
+            if str(cur) not in used:
+                self.doc["next_id"] = cur + 1
+                return cur
+            cur += 1
+        raise RuntimeError("could not allocate a unique node id after %d probes"
+                           % MAX_ID_PROBE)
 
     def add_node(self, node: Dict[str, Any], parent_id: int = 1) -> int:
         nid = node.get("id")
@@ -390,6 +407,62 @@ class FigcraftDocument:
         clean.pop("overrides", None)
         return self.duplicate_node(component_id, parent_id=parent_id,
                                    overrides=clean or None)
+
+    def ensure_board(self, name: str, x: float = 0.0, y: float = 0.0,
+                     width: Optional[float] = None, height: Optional[float] = None,
+                     fill: Optional[str] = None, corner_radius: float = 0.0,
+                     clip: bool = True) -> int:
+        """Reuse an existing top-level board or create it once.
+
+        The engine loads ``pages[0]`` only, so boards are adjacent top-level
+        frames on that page. Repeated calls with the same name return the same
+        frame instead of rebuilding it (SKILL section 3-board standard).
+        """
+        page_id = int((self.doc.get("pages") or [1])[0])
+        page = self.doc["nodes"].get(str(page_id), {})
+        for child_id in page.get("children", []) or []:
+            child = self.doc["nodes"].get(str(child_id))
+            if isinstance(child, dict) and child.get("name") == name:
+                return int(child_id)
+        screen = GEOMETRY.get("screen", {})
+        return self.create_frame(
+            name, page_id,
+            width=float(width) if width is not None else float(screen.get("width", 1280)),
+            height=float(height) if height is not None else float(screen.get("height", 960)),
+            x=x, y=y, fill=fill, corner_radius=corner_radius, clip=clip,
+        )
+
+    def find_or_reuse_component(
+        self,
+        name: str,
+        parent_id: Optional[int] = None,
+        builder: Optional[Callable[[], int]] = None,
+    ) -> Optional[int]:
+        """Return a named component, building it only when it is absent.
+
+        The bounded search is limited to ``parent_id``'s subtree when given.
+        An existing node is returned untouched so callers can duplicate it
+        with :meth:`duplicate_node` instead of rebuilding it from scratch.
+        """
+        roots = [parent_id] if parent_id is not None else list(self.doc.get("pages", [1]))
+        stack = [int(root) for root in roots]
+        seen = set()
+        while stack and len(seen) < MAX_SEARCH_NODES:  # cut-loop guard
+            current = stack.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            node = self.doc["nodes"].get(str(current))
+            if not isinstance(node, dict):
+                continue
+            if node.get("name") == name and node.get("type") != "page":
+                return current
+            stack.extend(int(child) for child in node.get("children", []) or []
+                         if str(child) in self.doc["nodes"])
+        if builder is None:
+            return None
+        built = builder()
+        return int(built) if built is not None else None
 
     def prevent_clipping(self, node_id: int) -> bool:
         """Enable clipping on a screen-level frame to contain child content."""
@@ -1931,6 +2004,23 @@ def component_first(doc: "FigcraftDocument", component_id: int, parent_id: int,
                     **overrides: Any) -> Optional[int]:
     """Component-first rule: reuse an existing component via duplicate/refine."""
     return doc.duplicate_node(component_id, parent_id=parent_id, overrides=overrides or None)
+
+
+def ensure_board(doc: "FigcraftDocument", name: str, x: float = 0.0, y: float = 0.0,
+                 width: Optional[float] = None, height: Optional[float] = None,
+                 fill: Optional[str] = None, corner_radius: float = 0.0,
+                 clip: bool = True) -> int:
+    """Reuse an existing ``pages[0]`` board or create it once."""
+    return doc.ensure_board(name, x=x, y=y, width=width, height=height,
+                            fill=fill, corner_radius=corner_radius, clip=clip)
+
+
+def find_or_reuse_component(
+    doc: "FigcraftDocument", name: str, parent_id: Optional[int] = None,
+    builder: Optional[Callable[[], int]] = None,
+) -> Optional[int]:
+    """Find a component for reuse; build it once only when it is absent."""
+    return doc.find_or_reuse_component(name, parent_id=parent_id, builder=builder)
 
 
 # ---------------------------------------------------------------------------

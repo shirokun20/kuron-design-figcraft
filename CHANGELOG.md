@@ -3,6 +3,33 @@
 One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
 `HARNESS_VERSION` are always identical.
 
+## 3.2.0 — Three boards, smart reuse, and a board-scoped audit
+
+- **Mandatory 3-board standard:** generators now place three adjacent
+  top-level frames on `pages[0]`: `00_Foundations` (semantic colour roles,
+  typography scale, spacing and radius tokens from `DESIGN.md`),
+  `01_Components` (reusable bases and variants), and `02_Screens` (final
+  screens). `ensure_board()` reuses an existing board and never rebuilds it.
+- **Smart reuse ("copy, do not rebuild"):** `find_or_reuse_component()`
+  locates an existing component in a bounded search and returns it untouched;
+  `duplicate_node()` deep-clones the whole subtree with fresh unique ids and
+  applies only the requested overrides. `alloc_id()` probes against the real
+  node map, so a stale `next_id` in a loaded file cannot cause a collision.
+  Screen instances are created by duplicating nodes from `01_Components`.
+- **`quick_design.py`:** added the `three-board` preset (also routed from a
+  "design system" / "foundations" brief). It fills Foundations from the
+  manifest, populates Components with Button, Badge, Card, Input, Row, and
+  variants, and builds Screens by duplicating those components. All existing
+  presets and flags remain compatible.
+- **`audit_render.py`:** audits every top-level board, not only frames wider
+  than 1000px. Contrast ancestry, traversal, and layout checks are scoped to
+  the board root, eliminating cross-board false positives; rule S-14 reports
+  overlapping sibling boards.
+- **Tests:** added `test_three_boards.py` covering 3-board layout, smart
+  reuse with unique ids, and multi-board audit detection and cleanliness.
+- **Version lock:** `VERSION`, `SKILL.md` metadata, `HARNESS_VERSION`, and
+  `tests/test_package_hygiene.py` all move to `3.2.0`.
+
 ## 3.1.0 — Manifest-driven scripts, Live Generate, and stronger audit
 
 - **New `scripts/design_manifest.py`:** locates `DESIGN.md` upward from the
@@ -37,7 +64,7 @@ One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
   in both themes using `a11y.minContrast`, and strengthens detection of text
   overflowing frames, content escaping parent bounds, and `clip: false`.
 - **Version lock:** `VERSION`, `SKILL.md` metadata, `HARNESS_VERSION`, the
-  `harness-info` manifest, and `tests/test_package_hygiene.py` all move to
+  `harness-info` manifest, and `tests/test_package_hygiene.py` all moved to
   `3.1.0`.
 - **English policy:** all skill documentation, comments, and docstrings are
   clean English; the `design-contract/v1` schema is unchanged.

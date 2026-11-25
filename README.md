@@ -46,6 +46,7 @@ cp <skill>/references/DESIGN.md ./DESIGN.md
 #    keep the two <!-- design-contract:v1:* --> sentinels around the JSON
 
 # 3. From the installed package root: generate a design + preview PNG
+python3 scripts/quick_design.py "three-board design system" -p three-board -o out/system.figcraft
 python3 scripts/quick_design.py "Project dashboard" -o out/workbench.figcraft --preview
 # 3b. Live Generate (Components / Screen / Form), driven by style_direction
 python3 scripts/quick_design.py --generate screen --style bento_modular -o out/screen.figcraft
@@ -86,6 +87,10 @@ This skill works as a modern product designer, not a screen generator:
 3. **Component-first reuse.** Build base components with clear variants and a
    `primitive → semantic → component` token hierarchy, then **duplicate and
    refine** existing nodes for new screens instead of rebuilding from scratch.
+   The mandatory three-board standard (`00_Foundations`, `01_Components`,
+   `02_Screens` on `pages[0]`) gives that reuse a fixed home; `ensure_board()`
+   and `find_or_reuse_component()` reuse what exists, and `duplicate_node()`
+   clones it with fresh unique IDs.
 4. **Sharp execution.** Measured, decisive calls; short time-boxing; no
    overthinking — with the zero-leak, green-tests, and 3–5x PNG checks intact.
 
@@ -150,10 +155,10 @@ validates it with the standard library. Key shape:
 ```text
 kuron-design-figcraft/
 ├── DESIGN.md                      # package manifest (explicit preset + extensions)
-├── SKILL.md                       # single contract (name + version 3.1.0)
+├── SKILL.md                       # single contract (name + version 3.2.0)
 ├── README.md                      # this file
 ├── LICENSE                        # MIT
-├── VERSION                        # 3.1.0 — single source of truth
+├── VERSION                        # 3.2.0 — single source of truth
 ├── CHANGELOG.md
 ├── .gitignore
 ├── install.sh                     # portable installer + version lock

@@ -125,14 +125,23 @@ That is what separates a living screen from a UI skin.
 2. **Token hierarchy:** `primitive → semantic → component` (then `theme/state`).
    Components never use raw hex; they use semantic tokens. Details:
    `token-architecture.md`.
-3. **In FigCraft, favour `Duplicate → Refine`:** copy an existing component node,
-   then tidy what is off. Do not assemble raw nodes from scratch for every
-   screen — that is a source of inconsistency and slow iteration.
-4. Changes to a parent component propagate to descendants. Node names stay
+3. **In FigCraft, `Duplicate → Refine` is mandatory:** if a component already
+   exists, copy it — never rebuild it. Call `ensure_board()` and
+   `find_or_reuse_component()` from `figcraft_tool.py` first; when a board or
+   component is present, reuse it and adjust only the needed properties, text,
+   or coordinates. `duplicate_node()` deep-clones the subtree with fresh unique
+   IDs, so repeated items never collide. Do not assemble raw nodes from scratch
+   for every screen — that is a source of inconsistency and slow iteration.
+4. **The three-board container:** `00_Foundations` (tokens from `DESIGN.md`),
+   `01_Components` (bases and variants), and `02_Screens` (screens built by
+   duplicating nodes from `01_Components`) are adjacent top-level frames on
+   `pages[0]`, the only page the engine loads. `quick_design.py --preset
+   three-board` implements this standard.
+5. Changes to a parent component propagate to descendants. Node names stay
    semantic (`Btn_<Action>`, `Card_<Name>`); match by `name`, not ID.
-5. Component states follow `states` in `DESIGN.md`; do not add ad hoc states that
+6. Component states follow `states` in `DESIGN.md`; do not add ad hoc states that
    are not recorded.
-6. When duplicating, preserve parent fill/stroke/radius/padding first, then
+7. When duplicating, preserve parent fill/stroke/radius/padding first, then
    refine. A duplicate that loses its styling is a visual regression defect.
 
 ---

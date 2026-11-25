@@ -88,7 +88,21 @@ example breakpoints). Touch targets must be ≥ `a11y.minTouchTargetPx`.
 3. **Match nodes by `name`, not ID** — numeric IDs shift between saves.
 4. Build base components first; create new screens with **Duplicate → Refine**,
    not by assembling raw nodes per screen (`product-designer-2026.md`).
-5. Node order follows a sensible reading order for screen readers.
+5. **Smart reuse:** call `ensure_board()` and `find_or_reuse_component()` before
+   creating anything. If a board or component already exists, copy it with
+   `duplicate_node()` (fresh unique IDs, zero collisions) and override only the
+   needed properties, text, or coordinates. Never rebuild a repeated item.
+6. Node order follows a sensible reading order for screen readers.
+
+### 4.1 Three-Board Container
+
+The engine loads `pages[0]` only, so a design system uses three adjacent
+top-level frames there, separated by `BOARD_GAP` (normally `120px`, derived from
+the space tokens): `00_Foundations` (colour, type, spacing, radius from
+`DESIGN.md`), `01_Components` (bases and variants), and `02_Screens` (final
+screens whose repeated items duplicate nodes from `01_Components`). Use
+`quick_design.py --preset three-board`; `audit_render.py` checks all three
+boards independently.
 
 ---
 

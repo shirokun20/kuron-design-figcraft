@@ -82,7 +82,7 @@ Example manifest:
 
 ```bash
 python3 scripts/agent_terminal.py --port 9880 harness-info
-# => {"name": "kuron-design-figcraft", "version": "3.1.0", ...}
+# => {"name": "kuron-design-figcraft", "version": "3.2.0", ...}
 ```
 
 ---

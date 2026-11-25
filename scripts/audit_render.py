@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Objective render audit for kuron-design-figcraft 3.1.0.
+"""Objective render audit for kuron-design-figcraft 3.2.0.
 
 Numeric evidence replaces "the PNG looks right": canvas utilisation, text
 overflow, child content escaping frame bounds, disabled clipping, connector
 topology, dot semantics, and WCAG contrast in **both** themes. Every check
 cites the rule ID it enforces.
+
+Every top-level frame on ``pages[0]`` is audited as its own board. Traversal,
+contrast ancestry, and layout checks are scoped to that board, so adjacent
+boards never create false positives; board overlap is checked separately.
 
 Usage: python3 scripts/audit_render.py <file.figcraft> [--screen ID]
 Exit 0 = all checks pass; 1 = at least one failure.
@@ -26,6 +30,7 @@ DESIGN = load_design()
 FAIL: List[str] = []
 MAX_TREE_NODES = 100000
 MAX_ANCESTOR_STEPS = 64
+MAX_BOARDS = 256
 
 
 def note(screen: Any, rule: str, msg: str) -> None:
@@ -50,12 +55,13 @@ def is_visible_content(node: Dict[str, Any]) -> bool:
     return first_paint_hex(node) is not None
 
 
-def absolute_box(nodes: Dict[str, Any], node_id: Any):
-    """Accumulate local transforms up to the screen for a descendant node.
+def absolute_box(nodes: Dict[str, Any], node_id: Any, root_id: Any = None):
+    """Accumulate local transforms up to the board root for a descendant.
 
     Child transforms are stored relative to their parent frame, so summing the
-    ancestor chain (bounded by ``MAX_ANCESTOR_STEPS``) yields canvas-relative
-    coordinates suitable for a utilisation calculation.
+    ancestor chain (bounded by ``MAX_ANCESTOR_STEPS``) yields board-relative
+    coordinates. Stopping at ``root_id`` keeps sibling boards out of the
+    calculation.
     """
     x = y = 0.0
     current = str(node_id)
@@ -73,6 +79,8 @@ def absolute_box(nodes: Dict[str, Any], node_id: Any):
         y += ty
         if step == 0:
             width, height = node_w, node_h
+        if root_id is not None and current == str(root_id):
+            return x, y, width, height
         parent = node.get("parent")
         if parent is None or str(parent) == current or str(parent) == "1":
             return x, y, width, height
@@ -80,10 +88,10 @@ def absolute_box(nodes: Dict[str, Any], node_id: Any):
     return x, y, 0.0, 0.0
 
 
-def content_bounds(nodes: Dict[str, Any], screen_id: Any):
-    """Bounding box of visible leaf content in a screen's subtree.
+def content_bounds(nodes: Dict[str, Any], screen_id: Any, root_id: Any = None):
+    """Bounding box of visible leaf content in one board's subtree.
 
-    Returns ``(x0, y0, x1, y1)`` or ``None`` when the screen holds no visible
+    Returns ``(x0, y0, x1, y1)`` or ``None`` when the board holds no visible
     leaf content — an empty full-size wrapper therefore scores zero, not 100%.
     """
     xs0, ys0, xs1, ys1 = [], [], [], []
@@ -93,7 +101,7 @@ def content_bounds(nodes: Dict[str, Any], screen_id: Any):
         node = nodes.get(nid)
         if not isinstance(node, dict) or not is_visible_content(node):
             continue
-        x, y, w, h = absolute_box(nodes, nid)
+        x, y, w, h = absolute_box(nodes, nid, root_id=root_id or screen_id)
         if w > 0 and h > 0:
             xs0.append(x)
             ys0.append(y)
@@ -131,8 +139,13 @@ def subtree(nodes: Dict[str, Any], root_id: Any) -> List[str]:
     return out
 
 
-def ancestor_fill(nodes: Dict[str, Any], node: Dict[str, Any]) -> Optional[str]:
-    """Find the nearest ancestor with a solid background fill."""
+def ancestor_fill(nodes: Dict[str, Any], node: Dict[str, Any],
+                  root_id: Any = None) -> Optional[str]:
+    """Find the nearest solid fill, bounded by the audited board root.
+
+    Without the board bound a text node in an unfilled wrapper could be
+    measured against a sibling board's surface — a cross-board false positive.
+    """
     parent_id = str(node.get("parent", ""))
     for _ in range(MAX_ANCESTOR_STEPS):
         parent = nodes.get(parent_id)
@@ -141,6 +154,8 @@ def ancestor_fill(nodes: Dict[str, Any], node: Dict[str, Any]) -> Optional[str]:
         paint = first_paint_hex(parent)
         if parent.get("type") in ("frame", "rectangle", "page") and paint:
             return paint
+        if root_id is not None and parent_id == str(root_id):
+            return None
         parent_id = str(parent.get("parent", ""))
         if not parent_id:
             return None
@@ -174,8 +189,10 @@ def audit_contract_contrast() -> None:
                         thresholds["required"]))
 
 
-def audit_screen(nodes: Dict[str, Any], screen_id: Any) -> None:
-    """Audit one top-level screen frame."""
+def audit_screen(nodes: Dict[str, Any], screen_id: Any,
+                 root_id: Any = None) -> None:
+    """Audit one board (or an explicitly selected screen), scoped to its root."""
+    board_root = root_id if root_id is not None else screen_id
     screen = nodes[str(screen_id)]
     name = screen.get("name", screen_id)
     x0, y0, width, height = frame_box(screen)
@@ -186,7 +203,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any) -> None:
 
     # Canvas utilisation: bounding box of visible leaf content vs the screen
     # frame. Empty layout wrappers (Body, Canvas, ...) never count as content.
-    bounds = content_bounds(nodes, screen_id)
+    bounds = content_bounds(nodes, screen_id, root_id=board_root)
     if bounds is None:
         note(name, "S-06", "canvas utilisation 0% < 60% (no visible leaf content)")
     else:
@@ -231,7 +248,7 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any) -> None:
                      % (current.get("name"), bottom, inner_height))
 
             foreground = first_paint_hex(current)
-            background = ancestor_fill(nodes, current)
+            background = ancestor_fill(nodes, current, root_id=board_root)
             ratio = contrast_ratio(foreground, background) if foreground and background else None
             if ratio is not None and ratio + 1e-9 < thresholds["required"]:
                 note(name, "S-12", "text '%s' contrast %.2f:1 below %s %.2f:1"
@@ -304,22 +321,45 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any) -> None:
                      % (node_name, fill, expected))
 
 
+def audit_board_overlap(nodes: Dict[str, Any], board_ids: List[int],
+                        label: str) -> None:
+    """Flag any two top-level boards whose rectangles overlap (rule S-14)."""
+    for index, first in enumerate(board_ids[:MAX_BOARDS]):
+        ax, ay, aw, ah = frame_box(nodes[str(first)])
+        for second in board_ids[index + 1:MAX_BOARDS]:
+            bx, by, bw, bh = frame_box(nodes[str(second)])
+            overlap_w = min(ax + aw, bx + bw) - max(ax, bx)
+            overlap_h = min(ay + ah, by + bh) - max(ay, by)
+            if overlap_w > 1 and overlap_h > 1:
+                note(label, "S-14",
+                     "boards '%s' and '%s' overlap by %.0fx%.0fpx"
+                     % (nodes[str(first)].get("name"), nodes[str(second)].get("name"),
+                        overlap_w, overlap_h))
+
+
 def audit_file(path: str, screen_id: Optional[str] = None) -> List[str]:
-    """Audit a .figcraft file; returns the shared failure list."""
+    """Audit every board in a .figcraft file; returns the shared failure list."""
     FAIL.clear()
     audit_contract_contrast()
     with zipfile.ZipFile(path) as archive:
         document = json.load(archive.open("document.json"))
     nodes = document.get("nodes", {})
     if screen_id:
-        audit_screen(nodes, screen_id)
+        audit_screen(nodes, screen_id, root_id=screen_id)
     else:
-        for page_id in document.get("pages", [1]):
+        for page_index, page_id in enumerate(document.get("pages", [1])):
             page = nodes.get(str(page_id), {})
-            for child_id in page.get("children", []):
-                child = nodes.get(str(child_id), {})
-                if child.get("type") == "frame" and (child.get("width") or 0) >= 1000:
-                    audit_screen(nodes, child_id)
+            board_ids = [
+                int(child_id) for child_id in page.get("children", [])
+                if isinstance(nodes.get(str(child_id)), dict)
+                and nodes[str(child_id)].get("type") == "frame"
+            ]
+            if not board_ids:
+                continue
+            audit_board_overlap(nodes, board_ids,
+                                "pages[%d]" % page_index)
+            for board_id in board_ids[:MAX_BOARDS]:
+                audit_screen(nodes, board_id, root_id=board_id)
     return FAIL
 
 

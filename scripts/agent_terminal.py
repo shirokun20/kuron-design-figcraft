@@ -34,7 +34,7 @@ ACTIVE_FILE = os.path.join(os.getcwd(), ".figcraft.active.json")
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 DEFAULT_DESIGN_REL = os.environ.get("FIGCRAFT_DESIGN", "design/workbench.figcraft")
-HARNESS_VERSION = "3.1.0"
+HARNESS_VERSION = "3.2.0"
 HARNESS_NAME = "kuron-design-figcraft"
 
 # Cut-loop guards: no read/poll loop may run unbounded.
@@ -486,11 +486,21 @@ class FigcraftTerminal:
         }
 
     def list_frames(self) -> Dict[str, Any]:
-        """Return screen-level frames (id, name, x/y/w/h) via document.inspect."""
-        inspect_res = self.send_rpc("document.inspect")
+        """Return screen-level frames (id, name, x/y/w/h) via document.inspect.
+
+        Large documents can exceed the engine's inspect output limit. A bounded
+        depth-1 request keeps the payload small and still returns every
+        top-level board; the full payload is the fallback for older engines.
+        """
+        inspect_res = self.send_rpc("document.inspect", {"depth": 1})
+        frames, debug = extract_frames(inspect_res)
+        if not frames or (not inspect_res.get("ok", True) and inspect_res.get("error")):
+            full_res = self.send_rpc("document.inspect")
+            full_frames, full_debug = extract_frames(full_res)
+            if full_frames and full_res.get("ok", True):
+                inspect_res, frames, debug = full_res, full_frames, full_debug
         if not inspect_res.get("ok", True) and inspect_res.get("error"):
             return {"ok": False, "error": inspect_res.get("error"), "engine_result": inspect_res}
-        frames, debug = extract_frames(inspect_res)
         if not frames:
             return {
                 "ok": False,

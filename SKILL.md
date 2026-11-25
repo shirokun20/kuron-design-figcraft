@@ -4,7 +4,7 @@ description: Token-driven UI design in FigCraft (.figcraft) with a MANDATORY pro
 metadata:
   author: Kuron Studio Team
   license: MIT
-  version: "3.1.0"
+  version: "3.2.0"
 ---
 
 # kuron-design-figcraft — DESIGN.md-Driven Design + FigCraft Visual Verification
@@ -47,7 +47,8 @@ consuming project, not by this skill.
 | Themes, surfaces, glass, parity, accessibility | `references/light-glass-system.md` | `figcraft_tool.py` |
 | Live session, port, sync, guardrails | `references/live-editing-workflow.md` | `agent_terminal.py`, `multi_agent_worker.py` |
 | Portable colour/size preset | `references/design-tokens.css` | — |
-| Objective audit (utilisation, overflow, contrast, topology) | `references/dark-artifact-rules.md` | `audit_render.py` |
+| Objective audit (all boards: utilisation, overlap, overflow, contrast, topology) | `references/dark-artifact-rules.md` | `audit_render.py` |
+| Three boards + copy-don't-rebuild smart reuse | this file, §3.1 | `figcraft_tool.py`, `quick_design.py` |
 
 All commands below run from the **skill package root**. Relative paths are
 portable. `scripts/agent_terminal.py` supports the global `--port <PORT>` flag,
@@ -70,11 +71,12 @@ Details: `references/product-designer-2026.md`. In short:
    complete states (`empty`, `loading`, `error`, `disabled`/`focus`, `success`,
    long text/data), proportionate and transparent AI-status patterns, and
    accessible, handoff-ready composition.
-3. **Component-first: `Duplicate → Refine`.** Build base components first
-   (input, form, button, icon, card/list item) with clear variants and the
-   `primitive → semantic → component → theme/state` hierarchy. In FigCraft,
-   duplicate an existing component node and refine it — never rebuild every
-   screen from scratch.
+3. **Component-first: `Duplicate → Refine`, on three boards.** Build base
+   components first (input, form, button, icon, card/list item) with clear
+   variants and the `primitive → semantic → component → theme/state` hierarchy.
+   In FigCraft, duplicate an existing component node and refine it — never
+   rebuild every screen from scratch. The three boards below are the mandatory
+   container for that work.
 4. **Sharp execution.** Measured, decisive calls; short time-boxing; no
    overthinking. The guardrails remain absolute (zero private paths, zero
    secrets, green tests, 3-5x PNG checks).
@@ -156,6 +158,31 @@ is **optional** by direction — `editorial`/`clean_utility` may omit it.
 5. **Every visual claim must be fresh.** Live sessions go stale, IDs shift,
    and `save()` always runs reflow.
 
+### 3.1 Three-Board Standard and Smart Reuse (mandatory)
+
+Because the engine and the exporter load `pages[0]` only, a design system is
+three adjacent top-level frames on that page, separated by a clean horizontal
+gap derived from the space tokens (`BOARD_GAP`, normally `120px`):
+
+| Board | Content | Rule |
+|---|---|---|
+| `00_Foundations` | Semantic colour roles with hex values, typography scale (`Display` / `Heading` / `Body` / `Caption` / `Mono`), spacing and radius tokens | Every value comes from `DESIGN.md` |
+| `01_Components` | Reusable bases and variants (`Button`, `Badge`, `NavItem`, `Card`, `Input`, `Row`, …) | Structured for direct duplication |
+| `02_Screens` | Final screens | Repeated items are **copies** of nodes from `01_Components` |
+
+**Smart reuse rule — if a component already exists, copy it; do not rebuild
+it.** Before creating anything, call `ensure_board()` / `find_or_reuse_component()`
+from `figcraft_tool.py`. If the board or component is already present, reuse it
+and change only the required properties, text, or coordinates. Use
+`duplicate_node()` to deep-clone the full subtree with fresh unique node IDs
+(so there are zero ID collisions), then refine the copy. Never rebuild a
+repeated component from scratch in a screen. `generate_three_boards()` in
+`quick_design.py` implements this end to end and is idempotent.
+
+`audit_render.py` audits each top-level board independently and scopes
+contrast and layout checks to that board, so the three neighbours cannot
+produce cross-board false positives.
+
 ---
 
 ## 4. End-to-End Workflow
@@ -183,6 +210,7 @@ audit_render.py → stop → report
 Minimal example:
 
 ```bash
+python3 scripts/quick_design.py "three-board design system" -p three-board -o out/system.figcraft
 python3 scripts/quick_design.py "Project dashboard" -o out/workbench.figcraft --preview
 python3 scripts/agent_terminal.py --port 9880 start --file out/workbench.figcraft
 python3 scripts/agent_terminal.py --port 9880 frames
@@ -394,7 +422,7 @@ cut-loop guard, so an agent can never hang.
 | `scripts/audit_render.py` | utilisation/overflow/clip/contrast/topology audit |
 | `scripts/multi_agent_worker.py` | partitioned IDs + lock for parallel work |
 
-**Script obligations toward `DESIGN.md` (implemented in 3.1.0):**
+**Script obligations toward `DESIGN.md` (implemented in 3.2.0):**
 
 1. Find and parse the `design-contract/v1` JSON block before build/lint/export.
 2. Resolve `$...` references, choose the theme, map roles → builders; validate
@@ -435,5 +463,5 @@ default on macOS), the working file with `FIGCRAFT_DESIGN`, and the design
 manifest with `FIGCRAFT_DESIGN_MANIFEST`.
 
 Single version: `VERSION` = frontmatter `metadata.version` =
-`HARNESS_VERSION` = `harness-info` manifest = **`3.1.0`**.
+`HARNESS_VERSION` = `harness-info` manifest = **`3.2.0`**.
 `install.sh` refuses installation when versions are out of sync.

@@ -85,7 +85,7 @@ class HygieneTests(unittest.TestCase):
         harness_match = re.search(r'^HARNESS_VERSION\s*=\s*["\']([^"\']+)',
                                   read_text(HARNESS), re.M)
         harness_version = harness_match.group(1) if harness_match else None
-        self.assertEqual(version, "3.1.0")
+        self.assertEqual(version, "3.2.0")
         self.assertEqual(skill_version, version)
         self.assertEqual(harness_version, version)
 
