@@ -96,14 +96,15 @@ example breakpoints). Touch targets must be ≥ `a11y.minTouchTargetPx`.
 
 ### 4.1 Three-Board Container
 
-A design system uses three adjacent top-level frames on a selected page of
-`pages[0..N]` (default `pages[0]`, which the live canvas shows first), separated
-by `BOARD_GAP` (normally `120px`, derived from the space tokens):
-`00_Foundations` (colour, type, spacing, radius from `DESIGN.md`),
-`01_Components` (bases and variants), and `02_Screens` (final screens whose
-repeated items duplicate nodes from `01_Components`). Use
-`quick_design.py --preset three-board --page-index N` or `--page-name NAME`;
-`audit_render.py` checks every board on every page independently.
+In multi-page mode a design system gives each board its own named page:
+`pages[0]` = `00_Foundations` (colour, type, spacing, radius from `DESIGN.md`),
+`pages[1]` = `01_Components` (bases and variants), `pages[2]` = `02_Screens`
+(screens whose repeated items duplicate nodes from `01_Components`), with
+optional exhibits such as `01_Reference` at `pages[3]`. Use
+`quick_design.py --preset three-pages` or `doc.ensure_named_pages([...])`.
+The legacy `--preset three-board --page-index N` / `--page-name NAME` keeps the
+three adjacent frames separated by `BOARD_GAP` on one page. `audit_render.py`
+checks every board on every page independently.
 
 ---
 

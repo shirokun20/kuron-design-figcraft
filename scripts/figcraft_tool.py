@@ -224,6 +224,35 @@ class FigcraftDocument:
         self.doc.setdefault("pages", []).append(nid)
         return nid
 
+    def ensure_named_pages(self, names: List[str]) -> List[int]:
+        """Return one existing-or-new page id per name, in that order.
+
+        The document's first page is renamed in place, so a fresh document has
+        exactly the requested named pages and no empty leading page. Repeated
+        calls are idempotent and never drop or duplicate later pages.
+        """
+        if not names:
+            return self.page_ids()
+        ids = self.page_ids()
+        if not ids:
+            ids = [self.add_page(names[0])]
+        first = self.doc["nodes"].get(str(ids[0]), {})
+        if isinstance(first, dict):
+            first["name"] = names[0]
+        result = [ids[0]]
+        for name in names[1:]:
+            match = None
+            for pid in self.page_ids():
+                page = self.doc["nodes"].get(str(pid), {})
+                if isinstance(page, dict) and str(page.get("name")) == name:
+                    match = pid
+                    break
+            if match is None:
+                match = self.add_page(name)
+            result.append(match)
+        self.doc["current_page"] = result[0]
+        return result
+
     @classmethod
     def load(cls, file_path: str) -> "FigcraftDocument":
         """Load an existing .figcraft file."""

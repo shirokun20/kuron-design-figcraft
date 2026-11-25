@@ -4,10 +4,11 @@
 Every colour, font size, spacing step, component size, and microcopy string is
 resolved from the project's ``DESIGN.md`` through ``design_manifest.py``. The
 ``--generate`` flag builds Components, Screen, or Form nodes for Live Generate
-sessions, and the layout is driven by ``style_direction``. The ``three-board``
-preset creates ``00_Foundations``, ``01_Components``, and ``02_Screens`` on the
-selected page of ``pages[0..N]``; screens duplicate existing components instead
-of rebuilding them.
+sessions, and the layout is driven by ``style_direction``. The ``three-pages``
+preset puts ``00_Foundations``, ``01_Components``, and ``02_Screens`` on their
+own pages; the legacy ``three-board`` preset keeps them adjacent on the selected
+page of ``pages[0..N]``. Screens duplicate existing components across pages
+instead of rebuilding them.
 
 All network operations use timeouts; the preview worker is always terminated.
 """
@@ -635,6 +636,8 @@ def build_foundations(doc: FigcraftDocument, board_id: int,
     board_h = float(height or board.get("height", SCREEN_H))
     pad = SPACE["xl"]
     inner = board_w - pad * 2
+    col_w = inner / 2.0
+    right_x = pad + inner / 2 + SPACE["lg"]
     colors = TOKENS["colors"]
 
     doc.create_text(
@@ -647,7 +650,7 @@ def build_foundations(doc: FigcraftDocument, board_id: int,
     doc.create_text(
         "ColorRolesTitle", "COLOR ROLES", board_id,
         font_size=TYPE["caption"], font_weight="Bold",
-        color=colors["text-2"], x=pad, y=y, width=inner,
+        color=colors["text-2"], x=pad, y=y, width=col_w,
     )
     y += TYPE["caption"] + SPACE["sm"]
 
@@ -662,28 +665,31 @@ def build_foundations(doc: FigcraftDocument, board_id: int,
     for role in roles:
         fill = colors[role]
         row = doc.create_frame(
-            "Swatch_" + role, board_id, inner, row_h,
+            "Swatch_" + role, board_id, col_w, row_h,
             x=pad, y=y, layout_mode="horizontal", gap=SPACE["sm"],
             cross_align="center", sizing_h="fill", sizing_v="fixed",
         )
         doc.create_rect(
             "SwatchPaint", row, SPACE["xl"] * 2, TYPE["caption"] + SPACE["xs"],
-            fill=fill, corner_radius=tokr("control"),
+            fill=fill, stroke=colors["line"], stroke_width=1.0,
+            corner_radius=tokr("control"),
         )
         doc.create_text(
             "SwatchLabel", "%s  %s" % (role, hex_of(fill)), row,
             font_size=TYPE["caption"], font_family=FONTS["font_mono"],
-            color=colors["text-2"], width=inner - SPACE["xl"] * 3,
+            color=colors["text-2"], width=col_w - SPACE["xl"] * 3,
         )
         y += row_h + SPACE["xxs"]
 
-    y += SPACE["sm"]
+    # The right column starts level with COLOR ROLES and uses the same token
+    # rhythm, so the two columns read as one balanced composition.
+    right_y = pad * 3
     doc.create_text(
         "TypeScaleTitle", "TYPOGRAPHY SCALE", board_id,
         font_size=TYPE["caption"], font_weight="Bold",
-        color=colors["text-2"], x=pad, y=y, width=inner,
+        color=colors["text-2"], x=right_x, y=right_y, width=col_w,
     )
-    y += TYPE["caption"] + SPACE["sm"]
+    right_y += TYPE["caption"] + SPACE["sm"]
     for key in ("display", "heading", "body", "caption", "mono"):
         size = TYPE[key]
         family = FONTS["font_mono"] if key == "mono" else FONTS["font_ui"]
@@ -691,48 +697,51 @@ def build_foundations(doc: FigcraftDocument, board_id: int,
             "Type_" + key, "%s  %dpx" % (key.upper(), size), board_id,
             font_size=size, font_family=family,
             font_weight="Bold" if key in ("display", "heading") else "Regular",
-            color=colors["text"], x=pad, y=y, width=inner,
+            color=colors["text"], x=right_x, y=right_y, width=col_w,
         )
-        y += max(size + SPACE["xs"], TYPE["body"] + SPACE["sm"])
+        right_y += max(size + SPACE["xs"], TYPE["body"] + SPACE["sm"])
 
-    y += SPACE["sm"]
+    right_y += SPACE["sm"]
     doc.create_text(
         "TokenTitle", "SPACING & RADIUS TOKENS", board_id,
         font_size=TYPE["caption"], font_weight="Bold",
-        color=colors["text-2"], x=pad, y=y, width=inner,
+        color=colors["text-2"], x=right_x, y=right_y, width=col_w,
     )
-    y += TYPE["caption"] + SPACE["sm"]
-    token_w = max(SPACE["xl"] * 4, inner / 8.0)
+    right_y += TYPE["caption"] + SPACE["sm"]
+    token_w = max(SPACE["xl"] * 4, col_w / 8.0)
     for key in ("xxs", "xs", "sm", "md", "lg", "xl"):
         doc.create_rect(
             "Space_" + key, board_id, SPACE[key], SPACE["xs"],
             fill=colors["selected"], corner_radius=SPACE["xxs"] / 2.0,
-            x=pad, y=y + (TYPE["caption"] - SPACE["xs"]) / 2.0,
+            x=right_x, y=right_y + (TYPE["caption"] - SPACE["xs"]) / 2.0,
         )
         doc.create_text(
             "SpaceLabel_" + key, "space.%s = %d" % (key, SPACE[key]), board_id,
             font_size=TYPE["caption"], font_family=FONTS["font_mono"],
-            color=colors["text-2"], x=pad + token_w, y=y, width=inner - token_w,
+            color=colors["text-2"], x=right_x + token_w, y=right_y,
+            width=col_w - token_w,
         )
-        y += TYPE["caption"] + SPACE["xxs"]
+        right_y += TYPE["caption"] + SPACE["xxs"]
     for role, radius in TOKENS["radii"].items():
         doc.create_rect(
             "Radius_" + role, board_id,
             min(token_w / 2.0, SPACE["xl"] * 3), max(TYPE["caption"], SPACE["xl"]),
-            fill=colors["surface-2"], corner_radius=float(radius), x=pad, y=y,
+            fill=colors["surface-2"], corner_radius=float(radius),
+            x=right_x, y=right_y,
         )
         doc.create_text(
             "RadiusLabel_" + role, "radius.%s = %s" % (role, radius), board_id,
             font_size=TYPE["caption"], font_family=FONTS["font_mono"],
-            color=colors["text-2"], x=pad + token_w, y=y, width=inner - token_w,
+            color=colors["text-2"], x=right_x + token_w, y=right_y,
+            width=col_w - token_w,
         )
-        y += max(TYPE["caption"], SPACE["xl"]) + SPACE["xxs"]
+        right_y += max(TYPE["caption"], SPACE["xl"]) + SPACE["xxs"]
 
     footer_h = TYPE["caption"] + SPACE["sm"]
     doc.create_text(
         "FoundationFooter", "source: DESIGN.md / design-contract/v1", board_id,
         font_size=TYPE["caption"], color=colors["text-2"],
-        x=pad, y=max(y + SPACE["sm"], board_h - pad - footer_h),
+        x=pad, y=max(max(y, right_y) + SPACE["sm"], board_h - pad - footer_h),
         width=inner, height=footer_h,
     )
     return board_id
@@ -840,6 +849,60 @@ def generate_three_boards(doc: FigcraftDocument, style: Optional[str] = None,
     return boards
 
 
+def generate_three_pages(doc: FigcraftDocument, style: Optional[str] = None,
+                         include_reference: bool = False) -> Dict[str, int]:
+    """Create the three-board design system on three dedicated pages.
+
+    ``pages[0]`` / ``pages[1]`` / ``pages[2]`` are named ``00_Foundations``,
+    ``01_Components``, and ``02_Screens``; an optional ``01_Reference`` page
+    follows at ``pages[3]``. Board ids stay stable and components are found
+    across pages, so ``02_Screens`` duplicates templates from ``01_Components``
+    instead of rebuilding them.
+    """
+    names = list(BOARD_NAMES)
+    if include_reference:
+        names.append("01_Reference")
+    page_ids = doc.ensure_named_pages(names)
+    boards: Dict[str, int] = {}
+    for name, page_id in zip(BOARD_NAMES, page_ids):
+        boards[name] = ft.ensure_board(
+            doc, name, x=BOARD_X, y=BOARD_Y,
+            width=SCREEN_W + SPACE["xl"] * 4,
+            height=SCREEN_H + SPACE["xl"] * 4,
+            fill=TOKENS["colors"]["surface"], corner_radius=tokr("window"),
+            clip=True, page_index=page_ids.index(page_id),
+        )
+
+    foundations = boards[BOARD_NAMES[0]]
+    if ft.find_or_reuse_component(doc, "FoundationTitle",
+                                  parent_id=foundations) is None:
+        build_foundations(doc, foundations,
+                          width=SCREEN_W + SPACE["xl"] * 4,
+                          height=SCREEN_H + SPACE["xl"] * 4)
+
+    components = boards[BOARD_NAMES[1]]
+    library = ft.find_or_reuse_component(
+        doc, "Components", parent_id=components,
+        builder=lambda: generate_components(doc, components, style=style),
+        page_name=BOARD_NAMES[1],
+    )
+    if library is not None and ft.find_or_reuse_component(
+            doc, "BaseSpecimens", parent_id=library) is None:
+        add_base_specimens(doc, library, style)
+    boards["components_library"] = int(library) if library is not None else 0
+
+    screens = boards[BOARD_NAMES[2]]
+    if ft.find_or_reuse_component(doc, "QuickDesign_Screen",
+                                  parent_id=screens) is None:
+        screen = doc.create_frame(
+            "QuickDesign_Screen", screens, SCREEN_W, SCREEN_H,
+            x=SPACE["xl"], y=SPACE["xl"] * 3,
+            fill=TOKENS["colors"]["bg"], corner_radius=tokr("window"), clip=True,
+        )
+        generate_screen_from_components(doc, screen, components, style=style)
+    return boards
+
+
 def add_base_specimens(doc: FigcraftDocument, parent_id: int,
                        style: Optional[str] = None) -> int:
     """Add Card, Input, and Row templates available for direct duplication."""
@@ -906,6 +969,9 @@ def generate_preset(preset_name: str, doc_name: str = "QuickDesign",
     doc = FigcraftDocument(doc_name)
     if preset_name == "three-board":
         generate_three_boards(doc, page_index=page_index, page_name=page_name)
+        return doc
+    if preset_name == "three-pages":
+        generate_three_pages(doc)
         return doc
     if preset_name == "dashboard":
         screen = doc.create_frame(text("project_dashboard"), 1, SCREEN_W, SCREEN_H,
@@ -1085,9 +1151,9 @@ def main() -> None:
     parser.add_argument("prompt", nargs="?", default="", help="Design brief (free text)")
     parser.add_argument("-p", "--preset",
                         choices=["workbench", "dashboard", "ledger", "drawer",
-                                 "three-board"],
+                                 "three-board", "three-pages"],
                         default="workbench",
-                        help="Template preset (three-board = 00/01/02 design system)")
+                        help="Template preset (three-pages = 00/01/02 on dedicated pages)")
     parser.add_argument("--generate", choices=["components", "screen", "form"],
                         help="Live Generate artifact to build inside the document")
     parser.add_argument("--style", choices=sorted(STYLE_DIRECTIONS),

@@ -160,11 +160,18 @@ is **optional** by direction — `editorial`/`clean_utility` may omit it.
 
 ### 3.1 Three-Board Standard and Smart Reuse (mandatory)
 
-A design system is three adjacent top-level frames on a selected page of
-`pages[0..N]`, separated by a clean horizontal gap derived from the space
-tokens (`BOARD_GAP`, normally `120px`). The three boards default to `pages[0]`
-because the live canvas displays that page first, but every script accepts a
-`page_index` / `page_name` selector and preserves later pages untouched:
+In multi-page mode the design system uses **one dedicated page per board**:
+`pages[0]` is `00_Foundations`, `pages[1]` is `01_Components`, and `pages[2]` is
+`02_Screens`; optional exhibits such as `01_Reference` follow at `pages[3]`.
+Use `doc.ensure_named_pages([...])` to create/reuse them and
+`quick_design.py --preset three-pages` for the offline generator. Each board
+keeps a token-derived `SPACE["xl"]` inset and a clean footer at the bottom.
+
+The legacy adjacent layout remains available: three top-level frames on one
+selected page of `pages[0..N]`, separated by `BOARD_GAP` (normally `120px`).
+`three-board` defaults to `pages[0]` because the live canvas displays that page
+first, but every script accepts a `page_index` / `page_name` selector and
+preserves later pages untouched:
 
 | Board | Content | Rule |
 |---|---|---|
@@ -181,6 +188,11 @@ and change only the required properties, text, or coordinates. Use
 repeated component from scratch in a screen. `generate_three_boards()` in
 `quick_design.py` implements this end to end and is idempotent.
 
+`find_or_reuse_component()` searches every page by default and
+`duplicate_node()` copies templates into a target board on any page, so a
+screen on `02_Screens` can reuse a component from `01_Components` without
+rebuilding it.
+
 `audit_render.py` audits each top-level board on every page independently and
 scopes contrast and layout checks to that board, so neither neighbouring
 boards nor other pages can produce false positives. Use `--page-index` or
@@ -191,7 +203,10 @@ commands to one page.
 and its `document.inspect` output can truncate on very large documents. That
 is a viewer behaviour, not a file limitation: `.figcraft` documents, offline
 builders, reflow, the auditor, and the terminal are all multi-page compatible
-and keep `pages[1..N]` intact. Verify later pages with the page selectors.
+and keep `pages[1..N]` intact. `export` / `export-all` with a non-zero page
+selector open a read-only temporary projection that promotes the target page
+to `pages[0]` for the engine, then reopen the original file and delete the
+temporary copy; the multi-page source on disk is never written.
 
 ---
 
@@ -382,7 +397,8 @@ Three hard rules:
    saved zip as the render contract.
 4. **Live canvas shows `pages[0]` by default:** later pages stay in the file
    and are handled by every script with page selectors; verify them with
-   `--page-index` / `--page-name` instead of assuming they are lost.
+   `--page-index` / `--page-name`. A non-zero export page is passed to the
+   engine via a read-only temporary projection, never by editing the source.
 5. **`open_file` is cached per path:** headless edit then reopening the same
    path is stale; force reload via close+open.
 6. **`save()` always reflows:** do not tune `y` manually — fix the structure

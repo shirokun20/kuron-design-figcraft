@@ -16,9 +16,12 @@ import re
 import json
 import time
 import socket
+import tempfile
+import zipfile
 import argparse
 import subprocess
 import signal
+from contextlib import contextmanager
 from typing import Optional, Dict, Any, List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -258,6 +261,62 @@ def select_inspect_page(inspect_payload: Any, page_index: Optional[int] = None,
     return None, None
 
 
+def resolve_document_page_id(document: Dict[str, Any],
+                             page_index: Optional[int] = None,
+                             page_name: Optional[str] = None) -> int:
+    """Resolve a page id in an on-disk document, by index or by name."""
+    ids = [int(pid) for pid in (document.get("pages") or [])]
+    if not ids:
+        raise ValueError("Document has no pages.")
+    if page_name is not None:
+        nodes = document.get("nodes", {})
+        for pid in ids:
+            if str(nodes.get(str(pid), {}).get("name")) == page_name:
+                return pid
+        available = [str(nodes.get(str(pid), {}).get("name")) for pid in ids]
+        raise ValueError("page %r not found; available pages: %s"
+                         % (page_name, ", ".join(available)))
+    index = 0 if page_index is None else int(page_index)
+    if index < 0 or index >= len(ids):
+        raise ValueError("page_index %d is out of range for %d page(s)"
+                         % (index, len(ids)))
+    return ids[index]
+
+
+def project_page(path: str, page_index: Optional[int] = None,
+                 page_name: Optional[str] = None,
+                 temp_dir: Optional[str] = None) -> Tuple[str, int]:
+    """Write a read-only single-page projection of *path* for export.
+
+    The target page is promoted to ``pages[0]`` in a brand-new temporary
+    archive; the source .figcraft file is only ever read. The caller owns the
+    returned temporary path and must remove it in a ``finally`` block.
+    """
+    src = os.path.abspath(path)
+    with zipfile.ZipFile(src, "r") as archive:
+        document = json.load(archive.open("document.json"))
+        members = [(info, archive.read(info.filename)) for info in archive.infolist()]
+    page_id = resolve_document_page_id(document, page_index, page_name)
+    document["pages"] = [page_id]
+    document["current_page"] = page_id
+    payload = json.dumps(document).encode("utf-8")
+    directory = temp_dir or os.path.dirname(src) or os.getcwd()
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".figcraft-project-", suffix=".figcraft", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as raw:
+            with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as out:
+                for info, data in members:
+                    out.writestr(info, payload if info.filename == "document.json" else data)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+    return temp_path, page_id
+
+
 def _find_node(obj: Any, wanted: str, depth: int = 0) -> Optional[Dict[str, Any]]:
     """Depth-first search for a node whose id matches *wanted* (string-compared)."""
     if depth > 25:
@@ -326,40 +385,43 @@ class FigcraftTerminal:
         s.settimeout(0.5)
         try:
             s.connect((self.host, self.port))
-            s.close()
             return True
         except Exception:
             return False
+        finally:
+            s.close()
 
     def send_rpc(self, method: str, params: Optional[Dict[str, Any]] = None, req_id: int = 1) -> Dict[str, Any]:
         """Send a single JSON-RPC 2.0 command over the TCP socket."""
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(self.timeout)
         try:
-            s.connect((self.host, self.port))
-        except Exception as e:
-            return {"ok": False, "error": f"Cannot connect to FigCraft at {self.host}:{self.port} ({e})"}
-
-        payload = {"jsonrpc": "2.0", "id": req_id, "method": method}
-        if params is not None:
-            payload["params"] = params
-
-        data_bytes = (json.dumps(payload) + "\n").encode("utf-8")
-        s.sendall(data_bytes)
-
-        buf = b""
-        # Bounded read: socket timeout + hard chunk cap (cut-loop guard).
-        for _ in range(MAX_SOCKET_CHUNKS):
             try:
-                chunk = s.recv(65536)
-                if not chunk:
+                s.connect((self.host, self.port))
+            except Exception as e:
+                return {"ok": False, "error": f"Cannot connect to FigCraft at {self.host}:{self.port} ({e})"}
+
+            payload = {"jsonrpc": "2.0", "id": req_id, "method": method}
+            if params is not None:
+                payload["params"] = params
+
+            data_bytes = (json.dumps(payload) + "\n").encode("utf-8")
+            s.sendall(data_bytes)
+
+            buf = b""
+            # Bounded read: socket timeout + hard chunk cap (cut-loop guard).
+            for _ in range(MAX_SOCKET_CHUNKS):
+                try:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    if b"\n" in buf:
+                        break
+                except socket.timeout:
                     break
-                buf += chunk
-                if b"\n" in buf:
-                    break
-            except socket.timeout:
-                break
-        s.close()
+        finally:
+            s.close()
 
         if not buf:
             return {"ok": False, "error": "No response from FigCraft socket"}
@@ -548,20 +610,72 @@ class FigcraftTerminal:
             result["page_index"] = selected
         return result
 
-    def export_frame(self, node_id: int, out_path: str, fmt: str = "png", scale: float = 1.0) -> Dict[str, Any]:
-        """Select a frame and export it cleanly to disk."""
+    @contextmanager
+    def projected_page(self, page_index: Optional[int] = None,
+                       page_name: Optional[str] = None):
+        """Temporarily open a single-page projection for a non-zero page export.
+
+        The live engine may render only ``pages[0]``. A read-only projection
+        promotes the requested page in a temporary copy, the original file is
+        reopened afterwards, and the temporary copy is deleted. Nothing is
+        ever written to the multi-page source on disk.
+        """
+        source = effective_design_path()
+        if not source or not os.path.exists(source):
+            raise RuntimeError("No active .figcraft file is known; run start/open first.")
+        with zipfile.ZipFile(source, "r") as archive:
+            document = json.load(archive.open("document.json"))
+        target = resolve_document_page_id(document, page_index, page_name)
+        first = resolve_document_page_id(document)
+        inspect = self.send_rpc("document.inspect", {"depth": 1})
+        current = inspect.get("result", {}).get("currentPage") \
+            if isinstance(inspect.get("result"), dict) else None
+        if target == first:
+            # The engine only expands the current page in inspect; make sure
+            # it is the one being exported, then restore the previous page.
+            self.execute_command("page.select", {"id": target})
+            try:
+                yield False
+            finally:
+                if current is not None and current != target:
+                    self.execute_command("page.select", {"id": current})
+            return
+        temp_path, _ = project_page(source, page_index, page_name)
+        try:
+            self.execute_command("file.close", {"force": True})
+            opened = self.execute_command("file.open", {"path": temp_path})
+            if isinstance(opened, dict) and opened.get("error"):
+                raise RuntimeError("Could not open page projection: %s" % opened["error"])
+            self.execute_command("page.select", {"id": target})
+            yield True
+        finally:
+            try:
+                self.execute_command("file.close", {"force": True})
+                self.execute_command("file.open", {"path": source})
+                write_active_file(source)
+            finally:
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    def export_frame(self, node_id: int, out_path: str, fmt: str = "png",
+                     scale: float = 1.0, page_index: Optional[int] = None,
+                     page_name: Optional[str] = None) -> Dict[str, Any]:
+        """Select a frame and export it cleanly to disk, from any page."""
         abs_out = os.path.abspath(out_path)
         parent = os.path.dirname(abs_out)
         if parent:
             os.makedirs(parent, exist_ok=True)
 
-        self.execute_command("select.set", {"ids": [node_id]})
-        res = self.execute_command("file.export", {
-            "path": abs_out,
-            "ids": [node_id],
-            "format": fmt,
-            "scale": scale
-        })
+        with self.projected_page(page_index, page_name) as projected:
+            self.execute_command("select.set", {"ids": [node_id]})
+            res = self.execute_command("file.export", {
+                "path": abs_out,
+                "ids": [node_id],
+                "format": fmt,
+                "scale": scale
+            })
 
         success = res.get("ok", False) and os.path.exists(abs_out)
         bytes_len = os.path.getsize(abs_out) if success else 0
@@ -572,37 +686,57 @@ class FigcraftTerminal:
             "scale": scale,
             "path": abs_out,
             "bytes": bytes_len,
+            "projected_page": projected,
             "engine_result": res
         }
 
     def export_all(self, out_dir: str, fmt: str = "png", scale: float = 1.0,
                    prefix: str = "", page_index: Optional[int] = None,
                    page_name: Optional[str] = None) -> Dict[str, Any]:
-        """Export frames of the selected page to <dir>/<slug>.<ext>."""
-        frames_res = self.list_frames(page_index=page_index, page_name=page_name)
-        if not frames_res.get("ok"):
-            return frames_res
+        """Export frames of the selected page to <dir>/<slug>.<ext>.
+
+        Frames are resolved on the original multi-page document; for a
+        non-zero page the export itself runs against a read-only projection
+        that promotes that page to ``pages[0]`` for the live engine.
+        """
         os.makedirs(os.path.abspath(out_dir), exist_ok=True)
         exported: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []
-        for fr in frames_res["frames"]:
-            name = fr.get("name")
-            if not name or not str(name).strip():
-                skipped.append({"id": fr.get("id"), "reason": "missing or blank frame name"})
-                continue
-            fname = f"{prefix}{slugify(str(name))}.{fmt}"
-            out_path = os.path.join(os.path.abspath(out_dir), fname)
-            res = self.export_frame(fr["id"], out_path, fmt=fmt, scale=scale)
-            if res.get("ok"):
-                exported.append({"id": fr.get("id"), "name": name, "path": res["path"]})
-            else:
-                skipped.append({"id": fr.get("id"), "name": name,
-                                "reason": res.get("engine_result", res)})
+        with self.projected_page(page_index, page_name) as projected:
+            # Inside the projection the target page is pages[0] and current,
+            # so the engine expands its frames in a small depth-1 inspect.
+            frames_res = self.list_frames()
+            if not frames_res.get("ok"):
+                return frames_res
+            for fr in frames_res["frames"]:
+                name = fr.get("name")
+                if not name or not str(name).strip():
+                    skipped.append({"id": fr.get("id"), "reason": "missing or blank frame name"})
+                    continue
+                fname = f"{prefix}{slugify(str(name))}.{fmt}"
+                out_path = os.path.join(os.path.abspath(out_dir), fname)
+                res = self.export_frame(fr["id"], out_path, fmt=fmt, scale=scale)
+                if res.get("ok"):
+                    exported.append({"id": fr.get("id"), "name": name, "path": res["path"]})
+                else:
+                    skipped.append({"id": fr.get("id"), "name": name,
+                                    "reason": res.get("engine_result", res)})
         result: Dict[str, Any] = {
             "ok": True, "count": len(exported),
             "exported": exported, "skipped": skipped,
+            "projected_page": projected,
         }
-        if frames_res.get("page_index") is not None:
+        if page_index is not None:
+            result["page_index"] = page_index
+        elif page_name is not None:
+            source = effective_design_path()
+            if source and os.path.exists(source):
+                with zipfile.ZipFile(source, "r") as archive:
+                    document = json.load(archive.open("document.json"))
+                ids = [int(pid) for pid in (document.get("pages") or [])]
+                target = resolve_document_page_id(document, page_name=page_name)
+                result["page_index"] = ids.index(target)
+        elif frames_res.get("page_index") is not None:
             result["page_index"] = frames_res["page_index"]
         return result
 
@@ -769,7 +903,8 @@ REPL_HELP = (
     "  open <path>            Open a file in running FigCraft (becomes the active file)\n"
     "  reload [--soft|--hard] [file]  Reload file (default --soft; uses the active file,\n"
     "                         fails non-zero if reload fails)\n"
-    "  export <id> <path>     Export one node to image\n"
+    "  export <id> <path> [--page-index N | --page-name NAME]\n"
+    "                         Export one node (page projection for N > 0)\n"
     "  export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] [--page-index N | --page-name NAME]\n"
     "                         Export all frames to a directory\n"
     "  diff <id>              Show property summary of one node\n"
@@ -786,7 +921,7 @@ REPL_CMD_HELP: Dict[str, str] = {
     "frames": "frames [--page-index N | --page-name NAME] — list frames on a page of pages[0..N]: id, name, x/y/w/h.",
     "open": "open <path> — open a .figcraft file in running FigCraft and make it the active file.",
     "reload": "reload [--soft|--hard] [file] — default --soft tries refresh without force-closing the tab, falls back to close+open with \"fallback\": true. Without a path it uses the file made active by start/open, and fails if no file is known or the reload fails. --hard always closes+opens.",
-    "export": "export <id> <path> — export one node to an image file.",
+    "export": "export <id> <path> [--page-index N | --page-name NAME] — export one node; a non-zero page uses a read-only projection.",
     "export-all": "export-all <dir> [--format png] [--scale 1.0] [--prefix \"\"] [--page-index N | --page-name NAME] — export frames of one page to <dir>/<slug>.<ext>.",
     "diff": "diff <id> — property summary (id, name, type, x/y/w/h, fill/stroke/text) for verifying mutations.",
     "exec": "exec <cmd> [json] — execute an engine command, e.g. exec file.save '{\"path\": \"out.figcraft\"}'.",
@@ -841,6 +976,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_exp.add_argument("--out", "-o", required=True, help="Output image file path")
     p_exp.add_argument("--format", default="png", choices=["png", "svg", "pdf", "webp"], help="Image format (default: png)")
     p_exp.add_argument("--scale", type=float, default=1.0, help="Export scale (default: 1.0)")
+    p_exp.add_argument("--page-index", type=int,
+                       help="Export this page index via a read-only projection (default: 0)")
+    p_exp.add_argument("--page-name", help="Export the named page via a read-only projection")
 
     # frames
     p_frames = sub.add_parser("frames", help="List screen-level frames via document.inspect (id, name, x/y/w/h)")
@@ -934,7 +1072,8 @@ def main():
         print(json.dumps(res, indent=2))
 
     elif args.cmd == "export":
-        res = term.export_frame(args.id, args.out, fmt=args.format, scale=args.scale)
+        res = term.export_frame(args.id, args.out, fmt=args.format, scale=args.scale,
+                                page_index=args.page_index, page_name=args.page_name)
         print(json.dumps(res, indent=2))
         sys.exit(0 if res.get("ok") else 1)
 
@@ -996,8 +1135,8 @@ def main():
                 "status": "python3 scripts/agent_terminal.py status [--port PORT]",
                 "frames": "python3 scripts/agent_terminal.py frames [--port PORT]",
                 "exec": "python3 scripts/agent_terminal.py exec <command> [params_json]",
-                "export": "python3 scripts/agent_terminal.py export --id <id> -o <path>",
-                "export-all": "python3 scripts/agent_terminal.py export-all -o <dir> [--format png] [--scale 1.0]",
+                "export": "python3 scripts/agent_terminal.py export --id <id> -o <path> [--page-index N | --page-name NAME]",
+                "export-all": "python3 scripts/agent_terminal.py export-all -o <dir> [--format png] [--scale 1.0] [--page-index N | --page-name NAME]",
                 "reload": "python3 scripts/agent_terminal.py reload [file] [--soft|--hard]",
                 "diff": "python3 scripts/agent_terminal.py diff --id <n>",
                 "watch": "python3 scripts/agent_terminal.py watch <file> -o <dir> [--debounce 0.5] [--max-events N] [--max-seconds S]",
@@ -1053,7 +1192,22 @@ def main():
                     return
                 print(json.dumps(term.reload_file(target, mode=mode), indent=2))
             elif action == "export" and len(parts) > 2:
-                print(json.dumps(term.export_frame(int(parts[1]), parts[2]), indent=2))
+                rest = (" ".join(parts[1:])).split()
+                out_path = rest[1]
+                page_index, page_name = None, None
+                i = 2
+                while i < len(rest):
+                    if rest[i] == "--page-index" and i + 1 < len(rest):
+                        page_index = int(rest[i + 1])
+                        i += 2
+                    elif rest[i] == "--page-name" and i + 1 < len(rest):
+                        page_name = rest[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+                print(json.dumps(term.export_frame(
+                    int(rest[0]), out_path, page_index=page_index,
+                    page_name=page_name), indent=2))
             elif action == "export-all" and len(parts) > 1:
                 rest = (" ".join(parts[1:])).split()
                 out_dir = rest[0]

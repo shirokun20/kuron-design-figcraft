@@ -68,8 +68,8 @@ Run all commands from the package root.
 | `watch` | Watch mtime → auto reload + export-all; uses the active file when no path is given | `--port 9880 watch out/workbench.figcraft -o out/previews/ --scale 2 --max-events 200 --max-seconds 600` |
 | `exec` | Direct JSON-RPC engine command | `--port 9880 exec select.set '{"ids": [10]}'` |
 | `diff` | Summarise one node's properties | `--port 9880 diff --id <ID>` |
-| `export` | Export ONE frame (`--id`, `-o`, `--format`, `--scale`) | `--port 9880 export --id <ID> -o out/previews/01.png --scale 2` |
-| `export-all` | Export ALL frames to a folder | `--port 9880 export-all -o out/previews/ --scale 2` |
+| `export` | Export ONE frame (`--id`, `-o`, `--format`, `--scale`, `--page-index` / `--page-name`) | `--port 9880 export --id <ID> -o out/previews/01.png --page-index 1` |
+| `export-all` | Export ALL frames of one page to a folder | `--port 9880 export-all -o out/previews/ --page-name 02_Screens` |
 | `interactive` | Interactive REPL (max 10,000 lines) | `--port 9880 interactive` |
 | `harness-info` | JSON manifest of harness capabilities | `--port 9880 harness-info` |
 | `stop` | Stop the FigCraft process | `--port 9880 stop` |

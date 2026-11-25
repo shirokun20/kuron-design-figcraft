@@ -158,8 +158,10 @@ Four assumptions proven wrong by render evidence — do not repeat them:
    rendering contract.
 4. **The live canvas shows the first page by default.** The `.figcraft` file and
    every bundled script are multi-page (`pages[0..N]`): reflow and save preserve
-   later pages. Use `--page-index` / `--page-name` on `frames`, `export-all`, and
-   `audit_render.py` to verify a specific page rather than assuming it is lost.
+   later pages. Use `--page-index` / `--page-name` on `frames`, `export`,
+   `export-all`, and `audit_render.py` to verify a specific page. Export of a
+   non-zero page uses a read-only temporary projection that promotes it to
+   `pages[0]` for the engine and restores the original file afterwards.
 5. **`open_file` is cached per path.** Headless edit then reopen the same path =
    stale. Force a reload: open another file first, then reopen the target.
 

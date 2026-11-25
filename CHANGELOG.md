@@ -35,6 +35,19 @@ One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
   3-board layout, smart reuse with unique ids, page selection and cross-page
   duplication, save/reflow preservation of `pages[1..N]`, and multi-page audit
   detection and cleanliness.
+- **Separate-page standard:** `ensure_named_pages()` and the `three-pages`
+  preset put `00_Foundations`, `01_Components`, and `02_Screens` on dedicated
+  pages; cross-page `find_or_reuse_component()` / `duplicate_node()` still copy
+  templates without rebuilding them.
+- **Foundations and component composition:** semantic swatches now carry a
+  1px `line` stroke so light roles stay crisp, Foundations fills two columns,
+  and stereo's `01_Components` uses a balanced 2x2 specimen grid.
+- **Page-safe export:** `export` / `export-all` accept `--page-index` /
+  `--page-name`; a non-zero page is exported through a read-only temporary
+  projection that promotes it to `pages[0]` for the live engine and restores
+  the original file, which is never written.
+- **Tests:** `test_stage5_remediation.py` covers the swatch stroke, two-column
+  coverage, dedicated pages and cross-page reuse, and no-mutation projection.
 - **Version lock:** `VERSION`, `SKILL.md` metadata, `HARNESS_VERSION`, and
   `tests/test_package_hygiene.py` all move to `3.2.0`.
 
