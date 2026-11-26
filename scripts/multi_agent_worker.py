@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Multi-Agent Concurrency Orchestrator (kuron-design-figcraft 3.2.2)
+FigCraft Multi-Agent Concurrency Orchestrator (kuron-design-figcraft 3.2.3)
 Demonstrates and manages concurrent multi-agent design workflows on a single .figcraft file.
 Compatible with Antigravity, Claude Code, Muse Code, and OMP.
 
@@ -272,6 +272,12 @@ class ASTPartitionMerger:
                 if root_id is not None and str(root_id) not in known:
                     children.append(root_id)
                     known.add(str(root_id))
+
+            # Resolve AutoLayout before writing. Without this, merged shards
+            # keep identity transforms and 0x0 text nodes collapse at (0,0).
+            # Imported lazily so --help works without a project DESIGN.md.
+            from figcraft_tool import resolve_document_layout  # noqa: E402
+            resolve_document_layout(doc)
 
             # Unique temp file in the target directory: no shared .tmp path and
             # os.replace() stays atomic on the same filesystem.

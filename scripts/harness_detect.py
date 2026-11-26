@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Lightweight runtime harness detection for FigCraft parallel workflows.
 
+Recognises Orca / Antigravity, Claude Code, OpenCode, and Codex from marker
+names only.
+
 Detection reads only well-known marker *names* and the generic terminal name
 from the process environment. It never opens credentials, config files, or
 private paths, and it has no dependencies outside the Python standard library.
@@ -13,18 +16,23 @@ import os
 from typing import Mapping, Optional
 
 SUPPORTED_HARNESSES = (
-    "antigravity", "claude-code", "opencode", "codex", "generic", "unknown",
+    "antigravity", "orca", "claude-code", "opencode", "codex", "generic",
+    "unknown",
 )
 
 # Marker names only. A marker counts as present when it has a non-empty,
 # non-disabled value; the value itself is never logged or stored.
 HARNESS_MARKERS = {
-    "antigravity": ("ANTIGRAVITY", "ANTIGRAVITY_SESSION", "ANTIGRAVITY_SESSION_ID"),
+    "antigravity": ("ANTIGRAVITY", "ANTIGRAVITY_SESSION",
+                    "ANTIGRAVITY_SESSION_ID", "GEMINI", "GEMINI_CLI",
+                    "GEMINI_SESSION_ID"),
+    "orca": ("ORCA_CLI_COMMAND", "ORCA_SESSION_ID", "ORCA_ENVIRONMENT",
+             "ORCA_TERMINAL_HANDLE"),
     "claude-code": ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION"),
     "opencode": ("OPENCODE", "OPENCODE_SESSION_ID", "OPENCODE_COMMAND"),
     "codex": ("CODEX", "CODEX_HOME", "CODEX_SESSION_ID"),
 }
-_DETECTION_ORDER = ("antigravity", "claude-code", "opencode", "codex")
+_DETECTION_ORDER = ("antigravity", "orca", "claude-code", "opencode", "codex")
 _GENERIC_MARKERS = ("AI_AGENT", "AGENT_NAME")
 _DISABLED = ("", "0", "false", "no", "off")
 _OVERRIDE_VAR = "FIGCRAFT_HARNESS"

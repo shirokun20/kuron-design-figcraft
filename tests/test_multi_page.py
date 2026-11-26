@@ -208,8 +208,10 @@ class TerminalPageSelectorTests(unittest.TestCase):
             result = term.list_frames(page_name="Archive")
         self.assertTrue(result["ok"])
         self.assertEqual(result["page_index"], 1)
+        # The page container itself is not a frame: exporting it would
+        # duplicate every screen under a page-named PNG.
         self.assertEqual([frame["name"] for frame in result["frames"]],
-                         ["Archive", "ArchiveBoard"])
+                         ["ArchiveBoard"])
 
 
 if __name__ == "__main__":

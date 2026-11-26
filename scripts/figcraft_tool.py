@@ -16,6 +16,7 @@ import socket
 import argparse
 import re
 import copy
+import math
 import tempfile
 from typing import Callable, Dict, List, Optional, Any, Tuple
 
@@ -51,6 +52,19 @@ GEOMETRY = DESIGN_DOC.get("geometry", {})
 # cut-loop guards keep a malformed or cyclic document from hanging a build.
 MAX_ID_PROBE = 100000
 MAX_SEARCH_NODES = 100000
+
+# Empirical glyph-metric calibration against figcraft-cli / app rendering
+# (see the verification report, defect 4). The legacy 0.52 / 0.62 ratios
+# systematically overestimated: "Left to right" (Inter 13px) rendered at
+# ~73px, not 89.9px; "COMPLETED" (JetBrains Mono 12px) at ~60px, not 67px.
+TEXT_WIDTH_RATIO_SANS = 0.42
+TEXT_WIDTH_RATIO_MONO = 0.54
+TEXT_WIDTH_RATIO_DISPLAY = 0.58
+TEXT_WIDTH_PADDING = 2.0
+TEXT_ALIGN_VALUES = ("left", "center", "right")
+TEXT_ALIGN_ALIASES = {"start": "left", "end": "right", "centre": "center"}
+FULL_CIRCLE_SWEEP = math.tau
+FULL_CIRCLE_EPSILON = 1e-3
 
 
 def get_tokens(theme: Optional[str] = None) -> Dict[str, Any]:
@@ -101,19 +115,79 @@ def make_solid_stroke(hex_str: str, opacity: float = 1.0) -> List[Dict[str, Any]
 # TEXT & ICONS (measurement + Lucide; used by create_text/build_button)
 # ---------------------------------------------------------------------------
 def estimate_text_width(text: str, font_size: float, font_family: str = "Inter") -> float:
-    """Estimate text width in px (same formula as test_layout_engine.py).
+    """Estimate the rendered glyph width of one line, in px.
 
-    Mono ~0.62*size, Space Grotesk ~0.58*size, others ~0.52*size, +2 padding.
-    Used by create_text/build_button so headless output does not overflow.
-    Calibration 2026-11-08: engine/app median = 0.94x the older estimate
-    (0.55) for Latin text; CJK ~0.98 (unchanged). The estimate is deliberately
-    slightly conservative (box >= glyph) so text is never clipped.
+    Ratios are calibrated against engine glyph metrics (see the module
+    constants): monospace 0.54, Space Grotesk 0.58, other sans-serif 0.42,
+    plus a small padding allowance. Used by create_text/build_button so the
+    stored box tracks the renderer instead of systematically overestimating.
     """
     if "Mono" in font_family:
-        return len(text) * font_size * 0.62 + 2
-    if "Space" in font_family or "Grotesk" in font_family:
-        return len(text) * font_size * 0.58 + 2
-    return len(text) * font_size * 0.52 + 2
+        ratio = TEXT_WIDTH_RATIO_MONO
+    elif "Space" in font_family or "Grotesk" in font_family:
+        ratio = TEXT_WIDTH_RATIO_DISPLAY
+    else:
+        ratio = TEXT_WIDTH_RATIO_SANS
+    return len(text) * font_size * ratio + TEXT_WIDTH_PADDING
+
+
+def normalize_align_h(value: Any) -> str:
+    """Map caller alignment spellings to figcraft-cli's ``align_h`` values."""
+    text = str(value or "left").strip().lower()
+    if text in TEXT_ALIGN_ALIASES:
+        return TEXT_ALIGN_ALIASES[text]
+    return text if text in TEXT_ALIGN_VALUES else "left"
+
+
+def is_full_circle_sweep(sweep: Any) -> bool:
+    """Whether an ellipse sweep describes a full circle (no arc endpoints)."""
+    try:
+        value = abs(float(sweep))
+    except (TypeError, ValueError):
+        return True
+    return (value <= FULL_CIRCLE_EPSILON
+            or abs(value - FULL_CIRCLE_SWEEP) <= FULL_CIRCLE_EPSILON)
+
+
+def _normalize_node_schema(node: Dict[str, Any]) -> None:
+    """Normalize builder/input aliases into the on-disk schema, in place.
+
+    * freeform frames never persist ``layout.mode == "none"`` (figcraft-cli
+      rejects that variant);
+    * text alignment is always ``align_h``, never ``text_align``;
+    * full-circle ellipses omit arc ``start`` / ``sweep`` fields so the stroke
+      has no radial seam. Genuine partial arcs are preserved.
+    """
+    layout = node.get("layout")
+    if isinstance(layout, dict) and str(layout.get("mode", "")).lower() == "none":
+        node.pop("layout", None)
+
+    if node.get("type") == "text":
+        alias = node.pop("text_align", None)
+        style = node.get("style")
+        if isinstance(style, dict) and "text_align" in style:
+            alias = style.pop("text_align") if alias is None else alias
+        if alias is not None:
+            node["align_h"] = normalize_align_h(alias)
+        elif "align_h" in node:
+            node["align_h"] = normalize_align_h(node["align_h"])
+
+    if node.get("type") == "ellipse" and "sweep" in node:
+        if is_full_circle_sweep(node["sweep"]):
+            node.pop("sweep", None)
+            node.pop("start", None)
+        elif "start" not in node:
+            node["start"] = 0.0
+
+
+def _normalize_document_schema(document: Dict[str, Any]) -> None:
+    """Apply :func:`_normalize_node_schema` to every node in a document."""
+    nodes = document.get("nodes") or {}
+    for index, node in enumerate(nodes.values()):
+        if index >= MAX_SEARCH_NODES:  # cut-loop guard
+            break
+        if isinstance(node, dict):
+            _normalize_node_schema(node)
 
 
 # Lucide icon paths v0.469.0 (grid 24, round stroke) for buttons.
@@ -157,7 +231,7 @@ def resolve_tree_layout(doc_nodes, root_id):
                 node["width"] = round(tw, 1)
             if ch_layout.get("sizing_v") == "hug" and node.get("height", 0) <= 0:
                 node["height"] = round(th, 1)
-            return node["width"], node["height"]
+            return node.get("width", 0.0), node.get("height", 0.0)
 
         if ntype != "frame":
             return node.get("width", 0.0), node.get("height", 0.0)
@@ -357,7 +431,23 @@ def resolve_tree_layout(doc_nodes, root_id):
 
         return node.get("width", avail_w), node.get("height", avail_h)
 
-    resolve_node(root_id, root["width"], root["height"])
+    resolve_node(root_id, root.get("width", 0.0), root.get("height", 0.0))
+
+
+def resolve_document_layout(document: Dict[str, Any]) -> None:
+    """Resolve AutoLayout for every board on every page of a raw document.
+
+    Shared by ``FigcraftDocument.save()`` and the offline AST merger so merged
+    shards cannot be written with collapsed text or identity transforms.
+    """
+    nodes = document.get("nodes") or {}
+    for pid in document.get("pages", [1]):
+        page = nodes.get(str(pid))
+        if not isinstance(page, dict):
+            continue
+        for sid in page.get("children", []) or []:
+            if str(sid) in nodes:
+                resolve_tree_layout(nodes, sid)
 
 
 # ---------------------------------------------------------------------------
@@ -500,14 +590,11 @@ class FigcraftDocument:
         Uses the core resolver in this module; ``save()`` never depends on a
         demo generator module.
         """
-        for pid in self.doc.get("pages", [1]):
-            page = self.doc["nodes"].get(str(pid))
-            if page:
-                for sid in page.get("children", []):
-                    resolve_tree_layout(self.doc["nodes"], sid)
+        resolve_document_layout(self.doc)
 
     def save(self, output_path: Optional[str] = None):
         """Save the document to .figcraft file."""
+        _normalize_document_schema(self.doc)
         try:
             self.resolve_layout()
         except Exception as e:
@@ -915,6 +1002,8 @@ class FigcraftDocument:
         sizing_h: str = "hug",
         sizing_v: str = "hug",
         max_w: Optional[float] = None,
+        align_h: str = "left",
+        text_align: Optional[str] = None,
     ) -> int:
         # R1: prevent text overflow (node 1020 was 279px inside a 233.6px card).
         # Engine parity 2026-11-08: reflow NEVER overwrites an already-measured
@@ -923,6 +1012,10 @@ class FigcraftDocument:
         # fills it via estimation ONLY when empty. S-08 stays green because
         # lint inspects the post-save result, not the birth value.
         # Visual truncation is the renderer's job; the stored width stays honest.
+        # ``text_align`` is accepted as an input alias for older callers, but
+        # only ``align_h`` is a valid figcraft-cli node property.
+        alignment = normalize_align_h(
+            text_align if text_align is not None else align_h)
         color = color or CONTENT.get("sheet") or TOKENS["colors"]["ink_primary"]
         estimated = estimate_text_width(text, font_size, font_family)
         if width is None:
@@ -941,6 +1034,7 @@ class FigcraftDocument:
             "transform": [1.0, 0.0, 0.0, 1.0, float(x), float(y)],
             "width": float(width),
             "height": float(height),
+            "align_h": alignment,
             "fills": make_solid_fill(color),
             "style": {
                 "font_family": font_family,
@@ -1410,16 +1504,21 @@ class FigcraftDocument:
         size: float,
         fill: str,
         x: float = 0.0,
-        y: float = 0.0
+        y: float = 0.0,
+        start: float = 0.0,
+        sweep: float = FULL_CIRCLE_SWEEP,
     ) -> int:
+        """Create a circle or a genuine partial arc.
+
+        A full circle carries no ``start`` / ``sweep`` arc fields: writing
+        ``sweep: 6.2831853`` makes figcraft-cli draw a radial seam.
+        """
         nid = self.alloc_id()
-        ellipse_node = {
+        ellipse_node: Dict[str, Any] = {
             "id": nid,
             "name": name,
             "type": "ellipse",
             "parent": parent_id,
-            "start": 0.0,
-            "sweep": 6.2831853,
             "inner": 0.0,
             "transform": [1.0, 0.0, 0.0, 1.0, float(x), float(y)],
             "width": float(size),
@@ -1435,6 +1534,9 @@ class FigcraftDocument:
                 "grid_column_span": 0, "grid_row_span": 0
             }
         }
+        if not is_full_circle_sweep(sweep):
+            ellipse_node["start"] = float(start)
+            ellipse_node["sweep"] = float(sweep)
         return self.add_node(ellipse_node, parent_id)
 
     # -----------------------------------------------------------------------
@@ -1540,7 +1642,8 @@ class FigcraftDocument:
             font_size=font_size,
             font_weight=font_weight,
             font_family=TOKENS["typography"]["font_ui"],
-            color=text_color
+            color=text_color,
+            align_h="center"
         )
         return btn_id
 
@@ -1599,6 +1702,7 @@ class FigcraftDocument:
             font_weight="SemiBold",
             font_family=TOKENS["typography"]["font_mono"],
             color=TOKENS["colors"][fg_role],
+            align_h="center",
         )
         return badge_id
 
@@ -2097,6 +2201,45 @@ def _lint_paint_hexes(node: Dict[str, Any]) -> List[str]:
     return hexes
 
 
+def freeform_piled_children(nodes: Dict[str, Any], frame: Dict[str, Any]) -> List[str]:
+    """Child ids stacked at (0,0) inside a non-AutoLayout (freeform) frame.
+
+    One full-frame child is allowed as a background layer; every additional
+    child at the origin means the freeform frame was never positioned.
+    """
+    if frame.get("type") != "frame":
+        return []
+    layout = frame.get("layout")
+    if isinstance(layout, dict) and layout.get("mode") not in (None, "none"):
+        return []   # AutoLayout places its own children
+    try:
+        frame_w = float(frame.get("width") or 0)
+        frame_h = float(frame.get("height") or 0)
+    except (TypeError, ValueError):
+        return []
+    piled: List[str] = []
+    backgrounds = 0
+    for child_id in frame.get("children", []) or []:
+        child = nodes.get(str(child_id))
+        if not isinstance(child, dict):
+            continue
+        transform = child.get("transform") or [1, 0, 0, 1, 0, 0]
+        try:
+            px, py = float(transform[4]), float(transform[5])
+            cw, ch = float(child.get("width") or 0), float(child.get("height") or 0)
+        except (IndexError, TypeError, ValueError):
+            continue
+        if abs(px) > 1e-6 or abs(py) > 1e-6 or cw <= 0 or ch <= 0:
+            continue
+        if frame_w > 0 and frame_h > 0 and cw >= frame_w * 0.9 and ch >= frame_h * 0.9:
+            backgrounds += 1
+        else:
+            piled.append(str(child_id))
+    if backgrounds > 1:
+        piled.extend("background:%d" % n for n in range(backgrounds - 1))
+    return piled
+
+
 def lint_design(doc: "FigcraftDocument") -> List[str]:
     """Validate a document with pure, I/O-free, warn-only quiet-workbench rules.
 
@@ -2211,6 +2354,32 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
                     "max_w or widen the card."
                 )
 
+    # Structural hardening: duplicate child ids and piled freeform siblings.
+    for nid, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        children = node.get("children") or []
+        if not isinstance(children, list):
+            continue
+        seen_children: set = set()
+        duplicates: List[str] = []
+        for child_id in children:
+            key = str(child_id)
+            if key in seen_children and key not in duplicates:
+                duplicates.append(key)
+            seen_children.add(key)
+        if duplicates:
+            warnings.append(
+                f"{label(nid, node)}: duplicate child id "
+                f"{', '.join(duplicates)} in children list — remove the extra entry."
+            )
+        piled = freeform_piled_children(nodes, node)
+        if len(piled) >= 2:
+            warnings.append(
+                f"{label(nid, node)}: {len(piled)} siblings piled at (0,0) "
+                "in a freeform frame — give each child a transform."
+            )
+
     # S-01 role counts: the action-primary role has three distinct meanings.
     # A fill on a shape is the single primary action surface; a fill on text
     # is an accent; a stroke is an active-selection ring.
@@ -2255,11 +2424,29 @@ def lint_design(doc: "FigcraftDocument") -> List[str]:
         page = nodes.get(str(pid), {})
         if not isinstance(page, dict):
             continue
+        if not (page.get("children") or []):
+            warnings.append(
+                f"Page '{page.get('name', pid)}': 0 children — the page is empty."
+            )
         for screen_id in page.get("children", []) or []:
             screen = nodes.get(str(screen_id), {})
             if not isinstance(screen, dict):
                 continue
             screen_name = screen.get("name", screen_id)
+            if not (screen.get("children") or []):
+                warnings.append(
+                    f"Screen '{screen_name}': 0 children — the board is empty."
+                )
+            try:
+                screen_w, screen_h = float(screen.get("width") or 0), \
+                    float(screen.get("height") or 0)
+            except (TypeError, ValueError):
+                screen_w = screen_h = 0.0
+            if screen_w <= 0 or screen_h <= 0:
+                warnings.append(
+                    f"Screen '{screen_name}': non-positive size "
+                    f"({screen_w:.0f}x{screen_h:.0f}) — the board cannot render."
+                )
             # Documentation canvases (component libraries, token guides) are
             # exempt from the one-primary-action rule per SKILL §5.
             is_docs_canvas = any(

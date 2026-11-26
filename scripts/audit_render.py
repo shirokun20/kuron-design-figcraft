@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Objective render audit for kuron-design-figcraft 3.2.2.
+"""Objective render audit for kuron-design-figcraft 3.2.3.
 
 Numeric evidence replaces "the PNG looks right": canvas utilisation, text
 overflow, child content escaping frame bounds, disabled clipping, connector
@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from design_manifest import contrast_ratio, load_design, to_builder_tokens  # noqa: E402
-from figcraft_tool import _lint_hex  # noqa: E402
+from figcraft_tool import _lint_hex, freeform_piled_children  # noqa: E402
 
 DESIGN = load_design()
 FAIL: List[str] = []
@@ -38,6 +38,9 @@ SUMMARY: Dict[str, int] = {}
 GENERIC_NAME = re.compile(
     r"^(untitled|frame|rectangle|ellipse|text|group|component|node|layer|"
     r"shape|object|item|section)(\s+\d+)?$", re.IGNORECASE)
+# Typographic punctuation that is safe in English captions (S-15). Other
+# non-ASCII characters still indicate non-English text or mojibake.
+SAFE_TYPOGRAPHY = frozenset("·—–★•…")
 MIN_CARD_DIMENSION = 60.0
 MIN_CARD_FILL = 0.30
 MAX_TREE_NODES = 100000
@@ -208,7 +211,7 @@ def is_descriptive_name(name: Any) -> bool:
     value = str(name or "").strip()
     if not value or GENERIC_NAME.match(value):
         return False
-    if any(ord(char) > 127 for char in value):
+    if any(ord(char) > 127 and char not in SAFE_TYPOGRAPHY for char in value):
         return False
     return any(char.isascii() and char.isalpha() for char in value)
 
@@ -294,6 +297,33 @@ def audit_card_fit(nodes: Dict[str, Any], screen_id: Any, label: str) -> None:
                                           MIN_CARD_FILL * 100))
 
 
+def audit_structure(nodes: Dict[str, Any], screen_id: Any, label: str) -> None:
+    """Structural checks: no duplicate child ids, no piled freeform siblings."""
+    for node_id in subtree(nodes, screen_id):
+        node = nodes.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        children = node.get("children") or []
+        if not isinstance(children, list):
+            continue
+        seen: set = set()
+        duplicates: List[str] = []
+        for child_id in children:
+            key = str(child_id)
+            if key in seen and key not in duplicates:
+                duplicates.append(key)
+            seen.add(key)
+        if duplicates:
+            note(label, "S-17",
+                 "node '%s' has duplicate child id %s"
+                 % (node.get("name"), ", ".join(duplicates)))
+        piled = freeform_piled_children(nodes, node)
+        if len(piled) >= 2:
+            note(label, "S-18",
+                 "frame '%s' has %d siblings piled at (0,0) in freeform layout"
+                 % (node.get("name"), len(piled)))
+
+
 def audit_screen(nodes: Dict[str, Any], screen_id: Any,
                  root_id: Any = None,
                  page_label: Optional[str] = None) -> None:
@@ -304,11 +334,19 @@ def audit_screen(nodes: Dict[str, Any], screen_id: Any,
     label = ("%s / %s" % (page_label, name)) if page_label else name
     audit_labels(nodes, screen_id, label)
     audit_card_fit(nodes, screen_id, label)
+    audit_structure(nodes, screen_id, label)
     x0, y0, width, height = frame_box(screen)
-    if not width or not height:
-        return
     children = [nodes[str(c)] for c in screen.get("children", [])
                 if str(c) in nodes]
+    if not screen.get("children"):
+        note(label, "S-06", "board has 0 children (empty board)")
+    try:
+        valid_size = float(width) > 0 and float(height) > 0
+    except (TypeError, ValueError):
+        valid_size = False
+    if not valid_size:
+        note(label, "S-06", "board has non-positive size (%sx%s)" % (width, height))
+        return
 
     # Canvas utilisation: bounding box of visible leaf content vs the screen
     # frame. Empty layout wrappers (Body, Canvas, ...) never count as content.
@@ -487,6 +525,9 @@ def audit_file(path: str, screen_id: Optional[str] = None,
             page = nodes.get(str(page_id), {})
             label = "page '%s'" % page.get("name") if page.get("name") \
                 else "pages[%d]" % page_id
+            if not (page.get("children") or []):
+                note(label, "S-06", "page has 0 children (no boards to audit)")
+                continue
             board_ids = [
                 int(child_id) for child_id in page.get("children", [])
                 if isinstance(nodes.get(str(child_id)), dict)

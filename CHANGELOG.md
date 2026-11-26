@@ -3,6 +3,34 @@
 One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
 `HARNESS_VERSION` are always identical.
 
+## 3.2.3 — Defect fixes, audit hardening, and layout calibration
+
+- **Terminal daemon state:** removed the `atexit` cleanup in
+  `scripts/agent_terminal.py` that deleted PID, port, and active-file state
+  immediately after a `start` command exited. State now survives the CLI exit
+  and is removed by an explicit `stop` or by dead-PID detection.
+- **Freeform serialization:** `save()` strips `layout.mode: none` from freeform
+  nodes and normalizes text alignment to `align_h` (with `text_align` accepted
+  as an input alias) for full compatibility with `figcraft-cli`.
+- **Merged layout resolution:** `ASTPartitionMerger.merge_subtrees()` now calls
+  `resolve_layout()` on the merged document, preventing collapsed `(0, 0)`
+  text nodes and identity transforms in merged shards.
+- **Text metrics:** `estimate_text_width()` glyph ratios were calibrated for
+  Inter (0.42) and JetBrains Mono (0.54); alignment is standardized on
+  `align_h` with `text_align` as a compatibility alias.
+- **Ellipse stroke seam:** full circles no longer write arc `start` / `sweep`
+  fields, eliminating the radial stroke seam; genuine partial arcs are kept.
+- **Audit and lint hardening:** `audit_render.py` and `lint_design()` now fail
+  explicitly on empty or zero-size boards, detect duplicate child IDs and
+  freeform `(0, 0)` sibling pileups, and allow typographic punctuation
+  (`·`, `—`, `★`) under rule S-15.
+- **Frame export and harness detection:** `page` containers are filtered out
+  of `frames` and `export-all`, and `harness_detect.py` recognizes Orca,
+  Antigravity, Gemini, and other runtimes.
+- **Tests and version lock:** added 20 regression tests in
+  `tests/test_verified_defects.py` (142 total); all version markers move to
+  `3.2.3`.
+
 ## 3.2.2 — Concurrency hardening and multi-agent harness support
 
 - **Race-free atomic saves:** `FigcraftDocument.save()` now writes to a unique

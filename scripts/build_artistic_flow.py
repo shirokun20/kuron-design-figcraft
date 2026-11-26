@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Artistic Flow Generator — reference demo (kuron-design-figcraft 3.2.2).
+FigCraft Artistic Flow Generator — reference demo (kuron-design-figcraft 3.2.3).
 
 A token-driven, seven-screen reference flow used to exercise the shared
 AutoLayout engine. It is a bundled demo, not a project preset: values come

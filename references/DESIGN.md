@@ -1,6 +1,6 @@
 # DESIGN.md — Project Design Constitution (MANDATORY, single source of truth)
 
-> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.2
+> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.3
 >
 > **This file is a TEMPLATE + SPECIFICATION.** Every consuming project **MUST**
 > own a `DESIGN.md` at its project root. Copy this file, fill in the contract

@@ -9,7 +9,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from figcraft_tool import (FigcraftDocument, TOKENS, lint_design,  # noqa: E402
-                           hex_to_rgba)
+                           estimate_text_width, hex_to_rgba)
 
 COLORS = TOKENS["colors"]
 # Legacy aliases still exist, but the canonical roles are the contract.
@@ -99,7 +99,9 @@ class LintRuleTests(unittest.TestCase):
                 os.remove(path)
         width = doc.doc["nodes"][str(text_id)]["width"]
         self.assertFalse([m for m in lint_design(doc) if "overflows" in m])
-        expected = len("Import PDF") * 12.0 * 0.52 + 2
+        # The stored box must match the calibrated glyph estimate, not a
+        # frozen legacy ratio (see the calibrated estimate_text_width helper).
+        expected = estimate_text_width("Import PDF", 12.0)
         self.assertLess(abs(width - expected), 1.0)
 
     def test_s09_wrong_icon_colour_on_action_surface_warned(self):

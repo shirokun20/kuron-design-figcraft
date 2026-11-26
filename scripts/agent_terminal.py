@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.2.2)
+FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.2.3)
 Cross-Agent / Harness-Compatible Bridge (Claude Code, Codex, Cursor, generic harnesses)
 
 Provides a dedicated process manager, live JSON-RPC socket bridge, and CLI terminal
@@ -21,7 +21,6 @@ import zipfile
 import argparse
 import subprocess
 import signal
-import atexit
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List, Tuple
 
@@ -42,7 +41,7 @@ STATE_SCOPE_ENV = "FIGCRAFT_INSTANCE"
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 DEFAULT_DESIGN_REL = os.environ.get("FIGCRAFT_DESIGN", "design/workbench.figcraft")
-HARNESS_VERSION = "3.2.2"
+HARNESS_VERSION = "3.2.3"
 HARNESS_NAME = "kuron-design-figcraft"
 
 # Cut-loop guards: no read/poll loop may run unbounded.
@@ -246,14 +245,21 @@ def extract_frames(inspect_payload: Any) -> Tuple[List[Dict[str, Any]], Dict[str
         if isinstance(obj, dict):
             if _looks_like_frame(obj):
                 x, y, w, h = _bounds_of(obj)
-                frames.append({
-                    "id": obj.get("id"),
-                    "name": obj.get("name"),
-                    "x": x,
-                    "y": y,
-                    "w": w,
-                    "h": h,
-                })
+                ntype = str(obj.get("type", "")).strip().lower()
+                # Page containers have null geometry; exporting them duplicates
+                # every screen under a page-named file (defect 7).
+                is_page_container = ntype == "page" or all(
+                    value is None for value in (x, y, w, h))
+                if not is_page_container:
+                    frames.append({
+                        "id": obj.get("id"),
+                        "name": obj.get("name"),
+                        "type": obj.get("type"),
+                        "x": x,
+                        "y": y,
+                        "w": w,
+                        "h": h,
+                    })
             for key in ("frames", "screens", "pages", "children", "nodes", "document", "layers"):
                 child = obj.get(key)
                 if isinstance(child, (dict, list)):
@@ -433,19 +439,40 @@ class FigcraftTerminal:
                 pass
         clear_active_file(self.state_scope)
 
-    def _cleanup_state_files(self, owned_pid: Optional[int] = None) -> None:
-        """At-exit cleanup: only remove state still owned by our child PID."""
-        pid = owned_pid if owned_pid is not None else self._owned_pid
-        if pid is None:
-            return
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        """Whether a recorded owner PID still exists (no signals are sent)."""
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True   # exists but owned by another user
+        except OSError:
+            return False
+        return True
+
+    def cleanup_dead_pid_state(self) -> bool:
+        """Remove state files only when their recorded PID is stale/dead.
+
+        A foreground ``start`` command exits immediately after spawning the
+        background daemon; cleanup at interpreter exit would delete the live
+        daemon's state (defect 1). State is therefore removed only by an
+        explicit ``stop`` or here, when the recorded owner process is gone.
+        """
+        if not os.path.exists(self.pid_file):
+            return False
         try:
             with open(self.pid_file, "r", encoding="utf-8") as handle:
-                if int(handle.read().strip()) != pid:
-                    return   # another instance took over this scope
+                pid = int(handle.read().strip())
         except (OSError, ValueError):
-            return
+            return False   # unreadable state is not proof the owner is dead
+        if self._pid_alive(pid):
+            return False
         self._remove_state_files()
-        self._owned_pid = None
+        return True
 
     @staticmethod
     def _terminate_proc(proc) -> None:
@@ -524,7 +551,13 @@ class FigcraftTerminal:
         return self.send_rpc("engine.execute", {"command": command, "params": params or {}})
 
     def start_server(self, file_path: Optional[str] = None, wait_ready: bool = True) -> Dict[str, Any]:
-        """Launch FigCraft with the requested control port and automation flags."""
+        """Launch FigCraft with the requested control port and automation flags.
+
+        State files survive this command's exit: the spawned daemon needs them
+        for later ``export`` / ``stop`` calls from a fresh CLI process.
+        """
+        if not self.is_port_listening():
+            self.cleanup_dead_pid_state()   # stale dead-PID recovery only
         if self.is_port_listening():
             if file_path:
                 write_active_file(file_path, self.state_scope)
@@ -569,8 +602,8 @@ class FigcraftTerminal:
         if file_path:
             write_active_file(file_path, self.state_scope)
         self._owned_pid = proc.pid
-        # Guarantee no state file survives an unexpected process exit.
-        atexit.register(self._cleanup_state_files, proc.pid)
+        # No atexit cleanup here: the CLI exits while the daemon stays alive.
+        # State files are removed by stop_server() or dead-PID detection.
 
         if wait_ready:
             start_time = time.time()
@@ -806,6 +839,11 @@ class FigcraftTerminal:
             if not frames_res.get("ok"):
                 return frames_res
             for fr in frames_res["frames"]:
+                ntype = str(fr.get("type", "")).strip().lower()
+                if ntype == "page" or all(key in fr and fr.get(key) is None
+                                          for key in ("x", "y", "w", "h")):
+                    skipped.append({"id": fr.get("id"), "reason": "page container is not a frame"})
+                    continue
                 name = fr.get("name")
                 if not name or not str(name).strip():
                     skipped.append({"id": fr.get("id"), "reason": "missing or blank frame name"})

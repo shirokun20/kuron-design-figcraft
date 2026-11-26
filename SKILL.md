@@ -4,7 +4,7 @@ description: Token-driven UI design in FigCraft (.figcraft) with a MANDATORY pro
 metadata:
   author: Kuron Studio Team
   license: MIT
-  version: "3.2.2"
+  version: "3.2.3"
 ---
 
 # kuron-design-figcraft — DESIGN.md-Driven Design + FigCraft Visual Verification
@@ -500,5 +500,5 @@ default on macOS), the working file with `FIGCRAFT_DESIGN`, and the design
 manifest with `FIGCRAFT_DESIGN_MANIFEST`.
 
 Single version: `VERSION` = frontmatter `metadata.version` =
-`HARNESS_VERSION` = `harness-info` manifest = **`3.2.2`**.
+`HARNESS_VERSION` = `harness-info` manifest = **`3.2.3`**.
 `install.sh` refuses installation when versions are out of sync.
