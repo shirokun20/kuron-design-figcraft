@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Portable installer for kuron-design-figcraft 3.2.1.
+# Portable installer for kuron-design-figcraft 3.2.2.
 # Installs the clean package into DEST (the full skill directory), then verifies
 # the version lock, harness manifest, and full test suite from inside DEST.
 #

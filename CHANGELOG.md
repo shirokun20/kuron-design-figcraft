@@ -3,6 +3,28 @@
 One version for the whole package: `VERSION`, the `SKILL.md` frontmatter, and
 `HARNESS_VERSION` are always identical.
 
+## 3.2.2 — Concurrency hardening and multi-agent harness support
+
+- **Race-free atomic saves:** `FigcraftDocument.save()` now writes to a unique
+  temp file in the target directory, flushes and `fsync`s the completed archive,
+  and publishes it with `os.replace()`. Concurrent writers never share a
+  `.tmp` path, and a failed write or replace always removes its own temp file.
+- **Hardened `ASTPartitionMerger` (`scripts/multi_agent_worker.py`):** merges
+  multiple pages, preserves every ZIP container entry verbatim, rejects
+  duplicate node IDs deterministically before any write, recovers stale locks
+  from dead PIDs or old mtimes, retries under a bounded monotonic deadline, and
+  releases only a lock it still owns.
+- **Instance-scoped terminal state:** `scripts/agent_terminal.py` scopes PID,
+  active-file, and port metadata per port/instance with ownership-checked
+  `atexit` cleanup, so parallel subagents and workers never clobber one another.
+- **Runtime harness detection:** new stdlib-only `scripts/harness_detect.py`,
+  wired into `multi_agent_worker.py` and `agent_terminal.py harness-info`.
+  `SKILL.md` adds concise Antigravity (`swarm`, `run_workflow`,
+  `invoke_subagent`) and Claude Code (`Agent`) freeze-before-fanout and
+  page/board sharding guidance.
+- **Tests and version lock:** 16 new concurrency and harness unit tests in
+  `tests/test_concurrency_hardening.py`; all version markers move to `3.2.2`.
+
 ## 3.2.1 — Fail-closed discovery, core layout, and release hygiene
 
 - **Fail-closed `find_design()`:** removed the automatic fallback to the skill

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.2.1)
+FigCraft Agent Terminal & Live Port Controller (kuron-design-figcraft 3.2.2)
 Cross-Agent / Harness-Compatible Bridge (Claude Code, Codex, Cursor, generic harnesses)
 
 Provides a dedicated process manager, live JSON-RPC socket bridge, and CLI terminal
@@ -21,11 +21,13 @@ import zipfile
 import argparse
 import subprocess
 import signal
+import atexit
 from contextlib import contextmanager
 from typing import Optional, Dict, Any, List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from design_manifest import load_design  # noqa: E402
+from harness_detect import detect_harness  # noqa: E402
 
 DEFAULT_PORT = 9880
 PID_FILE = os.path.join(os.getcwd(), ".figcraft.pid")
@@ -33,11 +35,14 @@ PORT_FILE = os.path.join(os.getcwd(), ".figcraft.port")
 # Port metadata also records the file that start/open made active, so reload
 # and watch never fall back to a different (possibly stale) document.
 ACTIVE_FILE = os.path.join(os.getcwd(), ".figcraft.active.json")
+# Parallel workers isolate their state with an explicit scope (the CLI derives
+# one from --port). The paths above stay the single-instance default.
+STATE_SCOPE_ENV = "FIGCRAFT_INSTANCE"
 # Platform default only; override with FIGCRAFT_APP for other install locations.
 DEFAULT_APP_PATH = os.environ.get(
     "FIGCRAFT_APP", "/Applications/FigCraft.app/Contents/MacOS/FigCraft")
 DEFAULT_DESIGN_REL = os.environ.get("FIGCRAFT_DESIGN", "design/workbench.figcraft")
-HARNESS_VERSION = "3.2.1"
+HARNESS_VERSION = "3.2.2"
 HARNESS_NAME = "kuron-design-figcraft"
 
 # Cut-loop guards: no read/poll loop may run unbounded.
@@ -97,10 +102,30 @@ def resolve_design_path(path: Optional[str] = None) -> str:
     return cwd_abs
 
 
-def read_active_file() -> Optional[str]:
+def scoped_state_paths(scope: Optional[str] = None) -> Tuple[str, str, str]:
+    """Return per-instance (pid, port, active) state file paths.
+
+    An empty scope keeps the legacy global paths, so single-instance usage and
+    existing callers are unchanged. Scopes are sanitized before use as a file
+    name; no path or credential content is ever embedded in the name.
+    """
+    if not scope:
+        return PID_FILE, PORT_FILE, ACTIVE_FILE
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(scope)).strip("-.")
+    if not safe:
+        return PID_FILE, PORT_FILE, ACTIVE_FILE
+
+    def _scoped(base: str) -> str:
+        root, ext = os.path.splitext(base)
+        return "%s.%s%s" % (root, safe, ext)
+
+    return _scoped(PID_FILE), _scoped(PORT_FILE), _scoped(ACTIVE_FILE)
+
+
+def read_active_file(scope: Optional[str] = None) -> Optional[str]:
     """Return the absolute path of the session's active .figcraft file, if any."""
     try:
-        with open(ACTIVE_FILE, "r", encoding="utf-8") as handle:
+        with open(scoped_state_paths(scope)[2], "r", encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError, TypeError):
         return None
@@ -108,27 +133,29 @@ def read_active_file() -> Optional[str]:
     return path if isinstance(path, str) and path else None
 
 
-def write_active_file(path: Optional[str]) -> None:
+def write_active_file(path: Optional[str], scope: Optional[str] = None) -> None:
     """Persist the active .figcraft path for later reload/watch commands."""
     if not path:
         return
     try:
-        with open(ACTIVE_FILE, "w", encoding="utf-8") as handle:
+        with open(scoped_state_paths(scope)[2], "w", encoding="utf-8") as handle:
             json.dump({"active_file": resolve_design_path(path)}, handle)
     except OSError as exc:
         print("Warning: could not persist active file: %s" % exc, file=sys.stderr)
 
 
-def clear_active_file() -> None:
+def clear_active_file(scope: Optional[str] = None) -> None:
     """Forget the active file when a session is stopped."""
     try:
-        if os.path.exists(ACTIVE_FILE):
-            os.remove(ACTIVE_FILE)
+        active_file = scoped_state_paths(scope)[2]
+        if os.path.exists(active_file):
+            os.remove(active_file)
     except OSError:
         pass
 
 
-def effective_design_path(path: Optional[str] = None) -> Optional[str]:
+def effective_design_path(path: Optional[str] = None,
+                          scope: Optional[str] = None) -> Optional[str]:
     """Resolve an explicit path, else the persisted active file, else None.
 
     Never substitutes ``DEFAULT_DESIGN_REL`` here: a silent workbench fallback
@@ -136,7 +163,7 @@ def effective_design_path(path: Optional[str] = None) -> Optional[str]:
     """
     if path:
         return resolve_design_path(path)
-    return read_active_file()
+    return read_active_file(scope)
 
 
 def _unwrap_inspect(payload: Any) -> Any:
@@ -384,11 +411,41 @@ def friendly_json_error(err: Exception, example: str = '{"key": "value"}') -> st
 
 
 class FigcraftTerminal:
-    def __init__(self, port: int = DEFAULT_PORT, host: str = "127.0.0.1", timeout: float = 5.0):
+    def __init__(self, port: int = DEFAULT_PORT, host: str = "127.0.0.1",
+                 timeout: float = 5.0, state_scope: Optional[str] = None):
         self.port = port
         self.host = host
         self.timeout = timeout
         self.proc = None  # handle of the child we started, reaped on stop/failure
+        # Distinct scopes give parallel workers distinct PID/port/active files.
+        # With no scope the legacy global paths remain in use.
+        self.state_scope = str(state_scope or os.environ.get(STATE_SCOPE_ENV) or "") or None
+        self.pid_file, self.port_file, self.active_file = scoped_state_paths(self.state_scope)
+        self._owned_pid: Optional[int] = None
+
+    def _remove_state_files(self) -> None:
+        """Remove this instance's PID/port/active files (best effort)."""
+        for path in (self.pid_file, self.port_file):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+        clear_active_file(self.state_scope)
+
+    def _cleanup_state_files(self, owned_pid: Optional[int] = None) -> None:
+        """At-exit cleanup: only remove state still owned by our child PID."""
+        pid = owned_pid if owned_pid is not None else self._owned_pid
+        if pid is None:
+            return
+        try:
+            with open(self.pid_file, "r", encoding="utf-8") as handle:
+                if int(handle.read().strip()) != pid:
+                    return   # another instance took over this scope
+        except (OSError, ValueError):
+            return
+        self._remove_state_files()
+        self._owned_pid = None
 
     @staticmethod
     def _terminate_proc(proc) -> None:
@@ -470,12 +527,12 @@ class FigcraftTerminal:
         """Launch FigCraft with the requested control port and automation flags."""
         if self.is_port_listening():
             if file_path:
-                write_active_file(file_path)
+                write_active_file(file_path, self.state_scope)
             return {
                 "ok": True,
                 "status": "already_running",
                 "port": self.port,
-                "file": resolve_design_path(file_path) if file_path else read_active_file(),
+                "file": resolve_design_path(file_path) if file_path else read_active_file(self.state_scope),
                 "message": f"FigCraft control port {self.port} is already active and responsive."
             }
 
@@ -505,12 +562,15 @@ class FigcraftTerminal:
         )
         proc = self.proc
 
-        with open(PID_FILE, "w") as f:
+        with open(self.pid_file, "w") as f:
             f.write(str(proc.pid))
-        with open(PORT_FILE, "w") as f:
+        with open(self.port_file, "w") as f:
             f.write(str(self.port))
         if file_path:
-            write_active_file(file_path)
+            write_active_file(file_path, self.state_scope)
+        self._owned_pid = proc.pid
+        # Guarantee no state file survives an unexpected process exit.
+        atexit.register(self._cleanup_state_files, proc.pid)
 
         if wait_ready:
             start_time = time.time()
@@ -526,10 +586,8 @@ class FigcraftTerminal:
             if not ready:
                 self._terminate_proc(self.proc)
                 self.proc = None
-                for fpath in (PID_FILE, PORT_FILE):
-                    if os.path.exists(fpath):
-                        os.remove(fpath)
-                clear_active_file()
+                self._owned_pid = None
+                self._remove_state_files()
                 return {
                     "ok": False,
                     "error": f"FigCraft launched (PID {proc.pid}) but port {self.port} did not respond within 10s."
@@ -547,9 +605,9 @@ class FigcraftTerminal:
     def stop_server(self) -> Dict[str, Any]:
         """Gracefully terminate running FigCraft daemon."""
         pid = None
-        if os.path.exists(PID_FILE):
+        if os.path.exists(self.pid_file):
             try:
-                with open(PID_FILE) as f:
+                with open(self.pid_file) as f:
                     pid = int(f.read().strip())
             except Exception:
                 pass
@@ -568,14 +626,8 @@ class FigcraftTerminal:
         # was stale or absent, so no zombie/orphan is left behind.
         self._terminate_proc(self.proc)
         self.proc = None
-
-        for fpath in [PID_FILE, PORT_FILE]:
-            if os.path.exists(fpath):
-                try:
-                    os.remove(fpath)
-                except Exception:
-                    pass
-        clear_active_file()
+        self._owned_pid = None
+        self._remove_state_files()
 
         return {
             "ok": True,
@@ -588,9 +640,9 @@ class FigcraftTerminal:
         """Check live health and get active document inspection."""
         listening = self.is_port_listening()
         pid = None
-        if os.path.exists(PID_FILE):
+        if os.path.exists(self.pid_file):
             try:
-                with open(PID_FILE) as f:
+                with open(self.pid_file) as f:
                     pid = int(f.read().strip())
             except Exception:
                 pass
@@ -664,7 +716,7 @@ class FigcraftTerminal:
         reopened afterwards, and the temporary copy is deleted. Nothing is
         ever written to the multi-page source on disk.
         """
-        source = effective_design_path()
+        source = effective_design_path(scope=self.state_scope)
         if not source or not os.path.exists(source):
             raise RuntimeError("No active .figcraft file is known; run start/open first.")
         with zipfile.ZipFile(source, "r") as archive:
@@ -697,7 +749,7 @@ class FigcraftTerminal:
             try:
                 self.execute_command("file.close", {"force": True})
                 self.execute_command("file.open", {"path": source})
-                write_active_file(source)
+                write_active_file(source, self.state_scope)
             finally:
                 try:
                     os.remove(temp_path)
@@ -774,7 +826,7 @@ class FigcraftTerminal:
         if page_index is not None:
             result["page_index"] = page_index
         elif page_name is not None:
-            source = effective_design_path()
+            source = effective_design_path(scope=self.state_scope)
             if source and os.path.exists(source):
                 with zipfile.ZipFile(source, "r") as archive:
                     with archive.open("document.json") as handle:
@@ -805,7 +857,7 @@ class FigcraftTerminal:
         abs_p = resolve_design_path(file_path)
         res = self.execute_command("file.open", {"path": abs_p})
         if isinstance(res, dict) and res.get("ok", True) and not res.get("error"):
-            write_active_file(abs_p)
+            write_active_file(abs_p, self.state_scope)
             out = dict(res)
             out["active_file"] = abs_p
             return out
@@ -820,7 +872,7 @@ class FigcraftTerminal:
         reported as ``ok=False`` so the CLI exits non-zero instead of letting a
         session export a stale document.
         """
-        p = effective_design_path(file_path)
+        p = effective_design_path(file_path, scope=self.state_scope)
         if not p:
             return {"ok": False, "error": "No active .figcraft file is known; "
                     "pass a file path or run start/open first."}
@@ -833,7 +885,7 @@ class FigcraftTerminal:
             out["mode"] = "hard"
             out["file"] = p
             if out.get("ok") and not out.get("error"):
-                write_active_file(p)
+                write_active_file(p, self.state_scope)
             return out
 
         soft_attempts = [
@@ -853,7 +905,7 @@ class FigcraftTerminal:
                 out["fallback"] = False
                 out["mode"] = "soft"
                 out["file"] = p
-                write_active_file(p)
+                write_active_file(p, self.state_scope)
                 return out
             last = res
         # Fallback is allowed only for the same intended target.
@@ -866,7 +918,7 @@ class FigcraftTerminal:
         out["soft_error"] = last
         out["file"] = p
         if out.get("ok") and not out.get("error"):
-            write_active_file(p)
+            write_active_file(p, self.state_scope)
         return out
 
     def watch_file(self, file_path: Optional[str] = None, out_dir: str = ".",
@@ -881,7 +933,7 @@ class FigcraftTerminal:
         Stops on Ctrl-C, on ``max_events`` changes, or after ``max_seconds`` —
         every watch session is bounded (cut-loop guard).
         """
-        p = effective_design_path(file_path)
+        p = effective_design_path(file_path, scope=self.state_scope)
         if not p:
             return {"ok": False, "events": 0, "file": None, "stop": "no_active_file",
                     "error": "No active .figcraft file is known; pass a file path or run start/open first."}
@@ -1080,7 +1132,11 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    term = FigcraftTerminal(port=args.port)
+    # Parallel CLI workers use distinct ports; each port gets its own state
+    # files so PID, active-document, and port metadata never clobber each other.
+    cli_scope = os.environ.get(STATE_SCOPE_ENV) or (
+        str(args.port) if args.port != DEFAULT_PORT else None)
+    term = FigcraftTerminal(port=args.port, state_scope=cli_scope)
 
     if args.cmd == "start":
         res = term.start_server(file_path=args.file, wait_ready=not args.no_wait)
@@ -1159,6 +1215,8 @@ def main():
             "style_direction": design["style_direction"],
             "theme": design.get("default_theme", "dark"),
             "protocol": "TCP JSON-RPC 2.0",
+            "runtime_harness": detect_harness(),
+            "state_scope": term.state_scope or "default",
             "default_port": DEFAULT_PORT,
             "port_active": term.is_port_listening(),
             "capabilities": [
@@ -1231,7 +1289,7 @@ def main():
                         mode = "hard"
                     elif not t.startswith("--"):
                         target = t
-                target = target or read_active_file()
+                target = target or read_active_file(term.state_scope)
                 if not target:
                     print(json.dumps({"ok": False, "error": "No active .figcraft file; "
                                       "run start/open or pass a file path."}, indent=2))
@@ -1368,7 +1426,7 @@ def main():
                         i += 1
                     else:
                         i += 1
-                wfile = wfile or read_active_file()
+                wfile = wfile or read_active_file(term.state_scope)
                 if not wfile or not wout:
                     print(json.dumps({"ok": False, "error": "No active .figcraft file and no watch target; "
                                       "run start/open or pass a file path."}))

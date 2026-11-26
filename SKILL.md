@@ -4,7 +4,7 @@ description: Token-driven UI design in FigCraft (.figcraft) with a MANDATORY pro
 metadata:
   author: Kuron Studio Team
   license: MIT
-  version: "3.2.1"
+  version: "3.2.2"
 ---
 
 # kuron-design-figcraft — DESIGN.md-Driven Design + FigCraft Visual Verification
@@ -350,6 +350,22 @@ Guardrails:
 For parallel work, `multi_agent_worker.py` partitions ID namespaces
 (A `1000–1999`, B `2000–2999`) plus a `.figcraft.lock`.
 
+### 7.1 Freeze Before Fanout — Page/Board Sharding
+
+Freeze `DESIGN.md`, tokens, and a saved base `.figcraft` **before** fanout;
+workers never edit the frozen base or a sibling's shard. Give each worker one
+page/board plus a distinct ID namespace, then merge serially with
+`multi_agent_worker.py` (duplicate IDs are rejected, not silently overwritten).
+
+- **Antigravity:** freeze, then use `swarm` / `run_workflow` to dispatch one
+  `invoke_subagent` per page or board; each writes only its assigned page.
+- **Claude Code:** freeze, then start one `Agent` subagent (or workflow step)
+  per page/board with the same page and ID partitions; merge their outputs.
+
+Use a distinct `--port` per live worker (PID/active/port state is port-scoped),
+then run the 3-5x loop on the merged file. Detect the current runtime with
+`python3 scripts/agent_terminal.py harness-info` (`runtime_harness`).
+
 ---
 
 ## 8. Mandatory 3-5x Verification Loop
@@ -484,5 +500,5 @@ default on macOS), the working file with `FIGCRAFT_DESIGN`, and the design
 manifest with `FIGCRAFT_DESIGN_MANIFEST`.
 
 Single version: `VERSION` = frontmatter `metadata.version` =
-`HARNESS_VERSION` = `harness-info` manifest = **`3.2.1`**.
+`HARNESS_VERSION` = `harness-info` manifest = **`3.2.2`**.
 `install.sh` refuses installation when versions are out of sync.

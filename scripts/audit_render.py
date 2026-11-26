@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Objective render audit for kuron-design-figcraft 3.2.1.
+"""Objective render audit for kuron-design-figcraft 3.2.2.
 
 Numeric evidence replaces "the PNG looks right": canvas utilisation, text
 overflow, child content escaping frame bounds, disabled clipping, connector

@@ -16,6 +16,7 @@ import socket
 import argparse
 import re
 import copy
+import tempfile
 from typing import Callable, Dict, List, Optional, Any, Tuple
 
 # Make sibling modules importable from any cwd.
@@ -543,13 +544,25 @@ class FigcraftDocument:
             except Exception:
                 pass
 
-        temp_path = path + ".tmp"
+        # A per-save unique temp file in the target directory prevents two
+        # concurrent writers from sharing ``<path>.tmp``: each writer owns its
+        # own file and os.replace() publishes exactly one complete archive.
+        target_dir = os.path.dirname(os.path.abspath(path))
+        with tempfile.NamedTemporaryFile(
+                dir=target_dir, prefix=".figcraft-", suffix=".tmp",
+                delete=False) as handle:
+            temp_path = handle.name
         try:
             with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
                 # Compact like the engine (SKILL §7.3: schema from live save):
                 # indent=2 doubles document.json size without benefit.
                 z.writestr("document.json", json.dumps(self.doc, separators=(",", ":")))
                 z.writestr("thumbnail.png", existing_thumb or png_1x1)
+            # Flush the completed archive (including its central directory)
+            # before publishing it, so a crash cannot expose a truncated file.
+            with open(temp_path, "rb+") as f:
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(temp_path, path)
         finally:
             # A failed ZipFile write or replace must not leave a stale .tmp.

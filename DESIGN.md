@@ -1,6 +1,6 @@
 # DESIGN.md — FigCraft Reference Preset
 
-> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.1
+> Contract: `design-contract/v1` · Compatible with `kuron-design-figcraft` 3.2.2
 >
 > This file is the **skill package's own** design manifest. It is the explicit
 > source of the bundled preset values consumed by the reference scripts. A
